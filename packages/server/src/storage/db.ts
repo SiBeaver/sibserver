@@ -113,6 +113,53 @@ BEGIN
   END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS idx_nodes_fts ON nodes USING GIN(search_vector);
+
+-- gap ledger: 派生账（基准 + 差距行 + 证据 + 豁免），可由 (BOM@commit, 证据集) 完全重建
+CREATE TABLE IF NOT EXISTS gap_baseline (
+  project_id TEXT PRIMARY KEY REFERENCES projects(slug),
+  bom_commit TEXT NOT NULL,
+  bom JSONB NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gap_rows (
+  id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  requirement_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  severity TEXT NOT NULL,
+  source_ref TEXT NOT NULL,
+  bom_commit TEXT NOT NULL,
+  condition_fingerprint TEXT NOT NULL,
+  evidence_fingerprint TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  detected_at TEXT NOT NULL,
+  resolved_at TEXT,
+  superseded_at TEXT,
+  PRIMARY KEY (project_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_gap_rows_status ON gap_rows(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_gap_rows_key ON gap_rows(project_id, requirement_key);
+
+CREATE TABLE IF NOT EXISTS gap_evidence (
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  source_id TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  fingerprint TEXT NOT NULL,
+  reported_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, source_id)
+);
+
+CREATE TABLE IF NOT EXISTS gap_waivers (
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  fingerprint TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, fingerprint)
+);
 `;
 
 let _sql: postgres.Sql | null = null;

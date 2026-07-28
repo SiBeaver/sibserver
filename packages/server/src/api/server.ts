@@ -36,6 +36,8 @@ import { handleKnowledgeRecorded } from '../policies/self-heal.js';
 import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
 import { evaluateConstraints, summarizeResults } from '../policies/constraint-evaluator.js';
 import type { Constraint, EvidenceInput } from '../constraints/types.js';
+import { setBaseline, reportEvidence, reconcile, listGaps } from '../gap/engine.js';
+import { BomSnapshot, EvidenceItemInput, WaiverInput } from '../gap/types.js';
 
 // ============================================================
 // 操作处理器注册表（导出供 direct-mode 调用方使用）
@@ -294,8 +296,61 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
 
   app.get('/:project/api/v1/gaps', async (c) => {
     const slug = c.req.param('project');
-    const gaps = await evaluateAllAcceptanceGaps(getCtx(slug));
-    return json(c, { gaps });
+    const ledger = await listGaps(getCtx(slug));
+    if (ledger.bom_commit === null) {
+      // 未设基准：回退旧验收对账（内存计算），便于基准落地前过渡
+      const gaps = await evaluateAllAcceptanceGaps(getCtx(slug));
+      return json(c, { ...ledger, acceptance_gaps: gaps });
+    }
+    return json(c, ledger);
+  });
+
+  app.get('/:project/api/v1/gap/baseline', async (c) => {
+    const slug = c.req.param('project');
+    const baseline = await getCtx(slug).gap.getBaseline();
+    if (!baseline) return json(c, { bom_commit: null });
+    return json(c, { bom_commit: baseline.bom_commit, updated_at: baseline.updated_at });
+  });
+
+  app.post('/:project/api/v1/gap/baseline', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = BomSnapshot.safeParse(await c.req.json());
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    return json(c, await setBaseline(getCtx(slug), parsed.data));
+  });
+
+  app.post('/:project/api/v1/gap/evidence', async (c) => {
+    const slug = c.req.param('project');
+    const body = await c.req.json();
+    const parsed = EvidenceItemInput.array().safeParse(body.items ?? []);
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await reportEvidence(getCtx(slug), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, 409);
+    }
+  });
+
+  app.post('/:project/api/v1/gap/waivers', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = WaiverInput.safeParse(await c.req.json());
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    await getCtx(slug).gap.upsertWaiver({
+      fingerprint: parsed.data.fingerprint,
+      reason: parsed.data.reason,
+      expires_at: parsed.data.expires_at ?? null,
+      created_at: new Date().toISOString(),
+    });
+    return json(c, { ok: true });
+  });
+
+  app.post('/:project/api/v1/gap/reconcile', async (c) => {
+    const slug = c.req.param('project');
+    try {
+      return json(c, await reconcile(getCtx(slug)));
+    } catch (e: any) {
+      return json(c, { error: e.message }, 409);
+    }
   });
 
   app.post('/:project/api/v1/constraints/evaluate', async (c) => {

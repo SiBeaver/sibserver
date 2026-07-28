@@ -28,6 +28,7 @@ import type { ProjectManager } from '../projects/index.js';
 import { snakeToCamel } from '../api/transforms.js';
 import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
 import { evaluateConstraints, summarizeResults } from '../policies/constraint-evaluator.js';
+import { listGaps } from '../gap/engine.js';
 
 /** Wrap result: apply camelCase transform + JSON serialize for MCP text output */
 function jsonResult(data: unknown) {
@@ -299,13 +300,16 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await updateRequirementAcceptance(getCtx(), args));
   }));
 
-  server.tool('evaluate_gap', '评估需求的验收 Gap（未满足的验收项）', {
-    requirement_id: z.string().optional().describe('需求 ID。不传则评估所有有验收标准的需求'),
+  server.tool('evaluate_gap', '三方对账差距账单（violation/absence/staleness 三型 + goal 标注 + 豁免）；未设基准时回退验收项对账', {
+    requirement_id: z.string().optional().describe('需求 ID（仅未设基准的回退模式使用）'),
   }, log('evaluate_gap', async (args) => {
+    const c = getCtx();
+    const ledger = await listGaps(c);
+    if (ledger.bom_commit !== null) return jsonResult(ledger);
     if (args.requirement_id) {
-      return jsonResult(await evaluateAcceptanceGap(getCtx(), args.requirement_id));
+      return jsonResult(await evaluateAcceptanceGap(c, args.requirement_id));
     }
-    return jsonResult({ gaps: await evaluateAllAcceptanceGaps(getCtx()) });
+    return jsonResult({ ...ledger, acceptance_gaps: await evaluateAllAcceptanceGaps(c) });
   }));
 
   server.tool('evaluate_constraint', '评估约束是否满足（需要提供 evidence 数据）', {
@@ -750,15 +754,17 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await updateRequirementAcceptance(await ctx(project), args));
   }));
 
-  server.tool('evaluate_gap', '评估需求的验收 Gap（未满足的验收项）', {
+  server.tool('evaluate_gap', '三方对账差距账单（violation/absence/staleness 三型 + goal 标注 + 豁免）；未设基准时回退验收项对账', {
     project: projectParam,
-    requirement_id: z.string().optional().describe('需求 ID。不传则评估所有有验收标准的需求'),
+    requirement_id: z.string().optional().describe('需求 ID（仅未设基准的回退模式使用）'),
   }, log('evaluate_gap', async ({ project, ...args }) => {
     const c = await ctx(project);
+    const ledger = await listGaps(c);
+    if (ledger.bom_commit !== null) return jsonResult(ledger);
     if (args.requirement_id) {
       return jsonResult(await evaluateAcceptanceGap(c, args.requirement_id));
     }
-    return jsonResult({ gaps: await evaluateAllAcceptanceGaps(c) });
+    return jsonResult({ ...ledger, acceptance_gaps: await evaluateAllAcceptanceGaps(c) });
   }));
 
   server.tool('evaluate_constraint', '评估约束是否满足（需要提供 evidence 数据）', {

@@ -66,6 +66,50 @@ CREATE TABLE IF NOT EXISTS config (
 );
 
 INSERT OR IGNORE INTO config (key, value) VALUES ('default_project', 'default');
+
+CREATE TABLE IF NOT EXISTS gap_baseline (
+  project_id TEXT PRIMARY KEY,
+  bom_commit TEXT NOT NULL,
+  bom TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gap_rows (
+  id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  requirement_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  severity TEXT NOT NULL,
+  source_ref TEXT NOT NULL,
+  bom_commit TEXT NOT NULL,
+  condition_fingerprint TEXT NOT NULL,
+  evidence_fingerprint TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  detected_at TEXT NOT NULL,
+  resolved_at TEXT,
+  superseded_at TEXT,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS gap_evidence (
+  project_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  reported_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, source_id)
+);
+
+CREATE TABLE IF NOT EXISTS gap_waivers (
+  project_id TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, fingerprint)
+);
 `;
 
 /**
