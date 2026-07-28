@@ -59,8 +59,8 @@ export const RELATION_CONSTRAINTS: Record<RelationType, RelationConstraint> = {
     target: ['exploration'],
   },
   produces: {
-    source: ['exploration'],
-    target: ['decision', 'knowledge'],
+    source: ['exploration', 'task'],
+    target: ['decision', 'knowledge', 'artifact'],
   },
   informs: {
     source: ['knowledge', 'decision', 'requirement'],
@@ -79,7 +79,7 @@ export const RELATION_CONSTRAINTS: Record<RelationType, RelationConstraint> = {
     target: ['tech_debt'],
   },
   blocks: {
-    source: ['risk', 'tech_debt', 'requirement'],
+    source: ['risk', 'tech_debt', 'requirement', 'task'],
     target: ['goal', 'task'],
   },
   relates_to: {
