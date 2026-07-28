@@ -103,4 +103,15 @@ export interface WaiverRecord {
 export interface GapView extends GapRowRecord {
   in_progress_goal: { id: string; title: string } | null;
   waiver: { reason: string; expires_at: string | null } | null;
+  /** 该行对应证据的上报时间——账单展示证据年龄；无证据行为 null */
+  evidence_reported_at: string | null;
+}
+
+// ── 对照视图证据结构（AI 对照降级为目检，不产差距条目）────────
+
+export interface EvidenceScene {
+  requirement_key: string;
+  files: Array<{ path: string; bom_tag: string | null }>;
+  runs: Array<{ label: string; result: 'pass' | 'fail'; reported_at: string }>;
+  sibs_nodes: Array<{ id: string; type: string; title: string }>;
 }

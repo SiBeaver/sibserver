@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestSql } from './helpers/test-db.js';
 import { OperationContext } from '../src/operations/context.js';
-import { setBaseline, reportEvidence, reconcile, listGaps } from '../src/gap/engine.js';
+import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene } from '../src/gap/engine.js';
 import type { BomSnapshot } from '../src/gap/types.js';
 
 const NOW = '2026-07-28T02:00:00.000Z';
@@ -239,5 +239,63 @@ describe('Gap 引擎三方对账', () => {
     expect(again.refreshed).toBe(0);
     const second = await ctx.gap.getOpenRows();
     expect(second.map(r => r.id).sort()).toEqual(first.map(r => r.id).sort());
+  });
+
+  it('账单证据年龄：有证据行带 evidence_reported_at，无证据行为 null', async () => {
+    await setBaseline(ctx, bomV1(), NOW);
+    await reportEvidence(ctx, [
+      { source_id: 'constraint:c1', payload: { matched: 2, total: 5 }, reported_at: LATER },
+      { source_id: 'acceptance:dom/req-a#a1', payload: { passed: false, detail: 'pnpm test' }, reported_at: LATER },
+    ], LATER);
+    const ledger = await listGaps(ctx);
+    expect(ledger.gaps.find(g => g.source_ref === 'c1')?.evidence_reported_at).toBe(LATER);
+    expect(ledger.gaps.find(g => g.source_ref === 'a1')?.evidence_reported_at).toBe(LATER);
+    // b1 无证据 → null
+    expect(ledger.gaps.find(g => g.source_ref === 'b1')?.evidence_reported_at).toBeNull();
+  });
+
+  it('对照视图证据聚合：files / runs / sibs_nodes 按需求键过滤', async () => {
+    await ctx.nodes.insert({
+      id: 'req-node-a', type: 'requirement', title: '需求A', description: '', status: 'in_execution',
+      tags: [], created_at: NOW, updated_at: NOW, metadata: {},
+      priority: 'high', source: 'specs-md', source_detail: 'dom/req-a', acceptance: null,
+    });
+    await ctx.nodes.insert({
+      id: 'dec-1', type: 'decision', title: '技术选型', description: '', status: 'accepted',
+      tags: [], created_at: NOW, updated_at: NOW, metadata: {},
+      context: '', rationale: '', alternatives_considered: [], consequences: [],
+    });
+    await ctx.edges.insert({
+      id: 'e-d1', source_id: 'dec-1', target_id: 'req-node-a', relation: 'addresses',
+      weight: null, annotation: null, created_at: NOW,
+    });
+    await setBaseline(ctx, bomV1(), NOW);
+    await reportEvidence(ctx, [
+      { source_id: 'constraint:c1', payload: { matched: 5, total: 5 }, reported_at: LATER },
+      { source_id: 'acceptance:dom/req-a#a1', payload: { passed: true, detail: 'pnpm test' }, reported_at: LATER },
+      { source_id: 'acceptance:dom/req-b#b1', payload: { passed: false }, reported_at: LATER },
+      { source_id: 'bom-tags', payload: { tags: [
+        { key: 'dom/req-a', file: 'src/a.ts' },
+        { key: 'dom/req-a', file: 'src/a2.ts' },
+        { key: 'dom/req-b', file: 'src/b.ts' },
+      ] } },
+    ], LATER);
+
+    const scene = await buildEvidenceScene(ctx, 'dom/req-a');
+    expect(scene.requirement_key).toBe('dom/req-a');
+    expect(scene.files.map(f => f.path).sort()).toEqual(['src/a.ts', 'src/a2.ts']);
+    expect(scene.files[0].bom_tag).toBe('@bom dom/req-a');
+    // runs：约束 c1（pass）+ 验收项 a1（pass），不含 req-b 的 b1
+    expect(scene.runs).toHaveLength(2);
+    expect(scene.runs.every(r => r.result === 'pass')).toBe(true);
+    expect(scene.runs.every(r => r.reported_at === LATER)).toBe(true);
+    // sibs_nodes：需求节点 + 相邻 decision
+    expect(scene.sibs_nodes.map(n => n.id).sort()).toEqual(['dec-1', 'req-node-a']);
+
+    // 无任何证据的键 → 空结构不报错
+    const empty = await buildEvidenceScene(ctx, 'dom/nothing');
+    expect(empty.files).toEqual([]);
+    expect(empty.runs).toEqual([]);
+    expect(empty.sibs_nodes).toEqual([]);
   });
 });

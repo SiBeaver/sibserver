@@ -36,7 +36,7 @@ import { handleKnowledgeRecorded } from '../policies/self-heal.js';
 import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
 import { evaluateConstraints, summarizeResults } from '../policies/constraint-evaluator.js';
 import type { Constraint, EvidenceInput } from '../constraints/types.js';
-import { setBaseline, reportEvidence, reconcile, listGaps } from '../gap/engine.js';
+import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene } from '../gap/engine.js';
 import { BomSnapshot, EvidenceItemInput, WaiverInput } from '../gap/types.js';
 
 // ============================================================
@@ -333,7 +333,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
 
   app.post('/:project/api/v1/gap/waivers', async (c) => {
     const slug = c.req.param('project');
-    const parsed = WaiverInput.safeParse(await c.req.json());
+    const parsed = WaiverInput.safeParse(camelToSnake(await c.req.json()));
     if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
     await getCtx(slug).gap.upsertWaiver({
       fingerprint: parsed.data.fingerprint,
@@ -342,6 +342,13 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
       created_at: new Date().toISOString(),
     });
     return json(c, { ok: true });
+  });
+
+  app.get('/:project/api/v1/gap/evidence', async (c) => {
+    const slug = c.req.param('project');
+    const key = c.req.query('requirement_key') ?? c.req.query('requirementKey');
+    if (!key) return json(c, { error: 'requirement_key is required' }, 400);
+    return json(c, await buildEvidenceScene(getCtx(slug), key));
   });
 
   app.post('/:project/api/v1/gap/reconcile', async (c) => {

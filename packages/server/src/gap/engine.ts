@@ -9,6 +9,7 @@ import type {
   BomConstraint,
   BomRequirement,
   EvidenceItemInput,
+  EvidenceScene,
   GapRowRecord,
   GapView,
   WaiverRecord,
@@ -402,6 +403,10 @@ export async function listGaps(ctx: OperationContext): Promise<{
   );
 
   const goalByKey = await inProgressGoalsByKey(ctx, baseline?.bom ?? null);
+  const reportedAtBySource = new Map(
+    (await ctx.gap.getAllEvidence()).map(ev => [ev.source_id, ev.reported_at]),
+  );
+  const constraintIds = new Set((baseline?.bom.constraints ?? []).map(c => c.id));
 
   const gaps: GapView[] = rows.map(row => {
     const waiver = activeWaivers.get(row.condition_fingerprint) ?? null;
@@ -409,6 +414,9 @@ export async function listGaps(ctx: OperationContext): Promise<{
       ...row,
       in_progress_goal: goalByKey.get(row.requirement_key) ?? null,
       waiver: waiver ? { reason: waiver.reason, expires_at: waiver.expires_at } : null,
+      evidence_reported_at: row.evidence_fingerprint === null
+        ? null
+        : reportedAtBySource.get(evidenceSourceIdOf(row, constraintIds)) ?? null,
     };
   });
 
@@ -423,6 +431,84 @@ export async function listGaps(ctx: OperationContext): Promise<{
       waived: gaps.filter(g => g.waiver !== null).length,
     },
   };
+}
+
+/** 由差距行反推证据 source_id（引擎私有知识，不外泄到观察窗）。 */
+function evidenceSourceIdOf(row: GapRowRecord, constraintIds: Set<string>): string {
+  if (row.source_ref.startsWith('@bom:')) return 'bom-tags';
+  if (constraintIds.has(row.source_ref)) return `constraint:${row.source_ref}`;
+  return `acceptance:${row.requirement_key}#${row.source_ref}`;
+}
+
+// ── 对照视图证据聚合（目检数据，不产差距条目）─────────────────
+
+export async function buildEvidenceScene(
+  ctx: OperationContext,
+  requirementKey: string,
+): Promise<EvidenceScene> {
+  const scene: EvidenceScene = {
+    requirement_key: requirementKey,
+    files: [],
+    runs: [],
+    sibs_nodes: [],
+  };
+  const baseline = await ctx.gap.getBaseline();
+  const evidence = await ctx.gap.getAllEvidence();
+
+  for (const ev of evidence) {
+    if (ev.source_id === 'bom-tags') {
+      const tags = (ev.payload as { tags?: Array<{ key: string; file: string }> }).tags ?? [];
+      for (const tag of tags) {
+        if (tag.key !== requirementKey) continue;
+        scene.files.push({ path: tag.file, bom_tag: `@bom ${tag.key}` });
+      }
+      continue;
+    }
+    const acceptanceMatch = ev.source_id.match(/^acceptance:(.+)#([^#]+)$/);
+    if (acceptanceMatch) {
+      if (acceptanceMatch[1] !== requirementKey) continue;
+      const payload = ev.payload as { passed?: boolean; detail?: string };
+      scene.runs.push({
+        label: payload.detail ?? ev.source_id,
+        result: payload.passed === true ? 'pass' : 'fail',
+        reported_at: ev.reported_at,
+      });
+      continue;
+    }
+    const constraintMatch = ev.source_id.match(/^constraint:(.+)$/);
+    if (constraintMatch && baseline) {
+      const constraint = baseline.bom.constraints.find(c => c.id === constraintMatch[1]);
+      if (!constraint || constraintKey(constraint) !== requirementKey) continue;
+      const evidenceInput = buildEvidenceInput(constraint, ev.payload);
+      const result = await evaluateConstraint(constraint, evidenceInput, ctx);
+      scene.runs.push({
+        label: `${constraint.title}（${constraint.id}）`,
+        result: result.satisfied === true ? 'pass' : 'fail',
+        reported_at: ev.reported_at,
+      });
+    }
+  }
+
+  const requirementNodes = await ctx.nodes.getByType('requirement') as RequirementNode[];
+  const reqNode = requirementNodes.find(n => n.source_detail === requirementKey);
+  if (reqNode) {
+    scene.sibs_nodes.push({ id: reqNode.id, type: reqNode.type, title: reqNode.title });
+    const edges = [
+      ...await ctx.edges.getBySource(reqNode.id),
+      ...await ctx.edges.getByTarget(reqNode.id),
+    ];
+    const seen = new Set([reqNode.id]);
+    for (const edge of edges) {
+      const otherId = edge.source_id === reqNode.id ? edge.target_id : edge.source_id;
+      if (seen.has(otherId)) continue;
+      seen.add(otherId);
+      const node = await ctx.nodes.getById(otherId);
+      if (!node || (node.type !== 'decision' && node.type !== 'knowledge')) continue;
+      scene.sibs_nodes.push({ id: node.id, type: node.type, title: node.title });
+    }
+  }
+
+  return scene;
 }
 
 async function inProgressGoalsByKey(
