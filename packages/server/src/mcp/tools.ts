@@ -35,6 +35,139 @@ function jsonResult(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(snakeToCamel(data), null, 2) }] };
 }
 
+// ── MCP 响应瘦身 ─────────────────────────────────────────────
+// 写操作只回执确认字段（id/title/status），搜索截断 description——
+// 每次 MCP 调用都进 agent 上下文，全量回显是最大的 token 浪费源；
+// 全量对象按需经 get_node_context 获取。
+// 注：瘦身作用于 jsonResult 已 camelCase 化的 text 数据，字段匹配按别名兼容两种形态。
+
+/** 逻辑字段 → 候选键（camelCase 优先，兼容 snake_case 直调） */
+const SLIM_FIELD_ALIASES: Array<[string, string[]]> = [
+  ['id', ['id']],
+  ['type', ['type']],
+  ['title', ['title']],
+  ['name', ['name']],
+  ['status', ['status']],
+  ['relation', ['relation']],
+  ['eventType', ['eventType', 'event_type']],
+  ['sourceId', ['sourceId', 'source_id']],
+  ['targetId', ['targetId', 'target_id']],
+];
+
+const SEARCH_FIELD_ALIASES: Array<[string, string[]]> = [
+  ['id', ['id']],
+  ['type', ['type']],
+  ['title', ['title']],
+  ['status', ['status']],
+  ['domain', ['domain']],
+  ['confidence', ['confidence']],
+  ['scope', ['scope']],
+  ['createdAt', ['createdAt', 'created_at']],
+];
+
+function pickFields(node: Record<string, unknown>, aliases: Array<[string, string[]]>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, candidates] of aliases) {
+    for (const c of candidates) {
+      if (node[c] !== undefined) {
+        out[key] = node[c];
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** 节点/边/事件回执投影：只保留挑选字段 */
+function slimNode(node: Record<string, unknown>): Record<string, unknown> {
+  return pickFields(node, SLIM_FIELD_ALIASES);
+}
+
+/** 写操作信封瘦身：{entity, edges_created, event} → 全字段投影 */
+export function slimEnvelope(result: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(result)) {
+    if (Array.isArray(v)) {
+      out[k] = v.map(item => (item && typeof item === 'object' ? slimNode(item as Record<string, unknown>) : item));
+    } else if (v && typeof v === 'object') {
+      out[k] = slimNode(v as Record<string, unknown>);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/** 搜索结果投影：保留挑选所需字段，description 截断 */
+function slimSearchNode(node: Record<string, unknown>): Record<string, unknown> {
+  const out = pickFields(node, SEARCH_FIELD_ALIASES);
+  const desc = node.description;
+  if (typeof desc === 'string') {
+    out.description = desc.length > 200 ? `${desc.slice(0, 200)}…` : desc;
+  }
+  return out;
+}
+
+export function slimSearchResult(result: any): any {
+  if (Array.isArray(result)) return result.map(item => slimSearchNode(item as Record<string, unknown>));
+  return { ...result, results: (result.results ?? []).map((item: unknown) => slimSearchNode(item as Record<string, unknown>)) };
+}
+
+/** 批量操作：每条结果的 result 信封瘦身，summary 保留 */
+export function slimBatchResult(result: any): any {
+  return {
+    ...result,
+    results: (result.results ?? []).map((item: any) => (
+      item && typeof item === 'object' && item.result && typeof item.result === 'object'
+        ? { ...item, result: slimEnvelope(item.result) }
+        : item
+    )),
+  };
+}
+
+/**
+ * 工具响应瘦身（作用于 jsonResult 信封内的 text JSON）：
+ * 写操作 → slimEnvelope / slimBatchResult；搜索 → slimSearchResult。
+ */
+function slimToolResult(toolName: string, result: any): any {
+  const content = Array.isArray(result?.content) ? result.content[0] : undefined;
+  if (!content || typeof content.text !== 'string') return result;
+  try {
+    const data = JSON.parse(content.text);
+    const slimmed = toolName === 'batch_operations' ? slimBatchResult(data) : slimEnvelope(data);
+    content.text = JSON.stringify(snakeToCamel(slimmed), null, 2);
+  } catch {
+    // 非 JSON 文本——保持原样
+  }
+  return result;
+}
+
+function slimSearchToolResult(result: any): any {
+  const content = Array.isArray(result?.content) ? result.content[0] : undefined;
+  if (!content || typeof content.text !== 'string') return result;
+  try {
+    const data = JSON.parse(content.text);
+    content.text = JSON.stringify(snakeToCamel(slimSearchResult(data)), null, 2);
+  } catch {
+    // 非 JSON 文本——保持原样
+  }
+  return result;
+}
+
+const SLIM_WRITE_TOOLS = new Set([
+  'define_goal', 'decompose_goal', 'update_goal_status',
+  'create_task', 'update_task_status',
+  'begin_exploration', 'record_exploration_finding', 'conclude_exploration', 'abandon_exploration',
+  'record_decision',
+  'define_requirement', 'update_requirement_status', 'update_requirement_acceptance',
+  'identify_risk', 'update_risk', 'register_tech_debt',
+  'record_knowledge',
+  'link_nodes', 'delete_node', 'batch_operations',
+  'create_project', 'set_default_project',
+]);
+
+const SLIM_SEARCH_TOOLS = new Set(['search_nodes', 'full_text_search']);
+
 /** Wrap a tool handler with timing + error logging */
 function logged<A extends Record<string, unknown>>(
   label: string,
@@ -44,7 +177,12 @@ function logged<A extends Record<string, unknown>>(
   return async (args: A) => {
     const start = Date.now();
     try {
-      const result = await handler(args);
+      let result = await handler(args);
+      if (SLIM_WRITE_TOOLS.has(toolName)) {
+        result = slimToolResult(toolName, result);
+      } else if (SLIM_SEARCH_TOOLS.has(toolName)) {
+        result = slimSearchToolResult(result);
+      }
       console.log(`[MCP] ${label} ${toolName} ${Date.now() - start}ms`);
       return result;
     } catch (err) {
