@@ -57,11 +57,17 @@ function buildConversationText(input: DistillConversationInput): string {
   return '';
 }
 
+// 防御上限：蒸馏只看最近的上下文，超长输入成本高收益低
+const MAX_INPUT_CHARS = 20_000;
+
 export async function distillConversation(
   ctx: OperationContext,
   input: DistillConversationInput,
 ): Promise<DistillConversationResponse> {
-  const conversationText = buildConversationText(input);
+  const rawText = buildConversationText(input);
+  const conversationText = rawText.length > MAX_INPUT_CHARS
+    ? rawText.slice(-MAX_INPUT_CHARS)
+    : rawText;
   if (!conversationText) {
     return { proposals: [], summary: '无对话内容' };
   }

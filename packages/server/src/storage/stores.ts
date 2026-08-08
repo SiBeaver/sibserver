@@ -207,7 +207,7 @@ export class NodeStore {
         SELECT target_id AS node_id FROM edges WHERE project_id = ${this.projectId}
       ) e ON e.node_id = n.id
       WHERE n.project_id = ${this.projectId}
-      GROUP BY n.id
+      GROUP BY n.id, n.project_id
       HAVING COUNT(e.node_id) <= ${maxEdges}
       ORDER BY n.created_at DESC
       LIMIT ${limit}

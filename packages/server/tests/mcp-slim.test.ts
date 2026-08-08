@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { OperationContext } from '../src/operations/context.js';
-import { registerTools, slimEnvelope, slimSearchResult, slimBatchResult } from '../src/mcp/tools.js';
+import { registerTools, slimEnvelope, slimSearchResult, slimBatchResult, slimProjectStateResult } from '../src/mcp/tools.js';
 import { createTestSql } from './helpers/test-db.js';
 
 // MCP 响应瘦身：写操作只回执确认字段，搜索截断 description
@@ -104,6 +104,31 @@ describe('MCP 响应瘦身', () => {
     expect(out.summary).toEqual({ total: 1, succeeded: 1, failed: 0 });
     expect(out.results[0].result.task).toEqual({ id: 't1', type: 'task', title: 'T' });
     expect(out.results[0].op).toBe('create_task');
+  });
+
+  it('slimProjectStateResult 截断 description、去 content、findings 只留 3 条、去重复 requirements', () => {
+    const long = '字'.repeat(500);
+    const res = slimProjectStateResult({
+      content: [{ type: 'text', text: JSON.stringify({
+        active_goals: [{ id: 'g1', type: 'goal', title: 'G', status: 'active', description: long, content: 'x'.repeat(1000), success_criteria: ['a', 'b'] }],
+        active_explorations: [{ id: 'e1', type: 'exploration', title: 'E', status: 'active', description: 'd', hypothesis: long, findings: Array.from({ length: 5 }, (_, i) => `f${i}${'字'.repeat(300)}`) }],
+        requirements: [{ id: 'r1', type: 'requirement', title: 'R', status: 'accepted', description: 'req' }],
+        open_requirements: [{ id: 'r1', type: 'requirement', title: 'R', status: 'accepted', description: 'req' }],
+        statistics: { total_requirements: 1 },
+      }) }],
+    } as any);
+    const data = JSON.parse(res.content[0].text);
+    expect(data.activeGoals[0]).toEqual({
+      id: 'g1', type: 'goal', title: 'G', status: 'active',
+      description: expect.stringMatching(/^字{200}…$/),
+    });
+    expect(data.activeGoals[0]).not.toHaveProperty('content');
+    expect(data.activeGoals[0]).not.toHaveProperty('successCriteria');
+    expect(data.activeExplorations[0].findings).toHaveLength(3);
+    expect(data.activeExplorations[0].findings[0]).toMatch(/^f0字{198}…$/);
+    expect(data).not.toHaveProperty('requirements');
+    expect(data.openRequirements).toHaveLength(1);
+    expect(data.statistics).toEqual({ totalRequirements: 1 });
   });
 
   afterEach(() => close());

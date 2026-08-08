@@ -167,6 +167,61 @@ const SLIM_WRITE_TOOLS = new Set([
 ]);
 
 const SLIM_SEARCH_TOOLS = new Set(['search_nodes', 'full_text_search']);
+const SLIM_STATE_TOOLS = new Set(['get_project_state', 'cockpit']);
+
+/** 状态快照节点投影：保留概览字段，description 截断，去掉 content 全文，findings 只留前 3 条 */
+function slimStateNode(node: Record<string, unknown>): Record<string, unknown> {
+  const out = pickFields(node, [
+    ['id', ['id']],
+    ['type', ['type']],
+    ['title', ['title']],
+    ['status', ['status']],
+    ['priority', ['priority']],
+    ['severity', ['severity']],
+    ['likelihood', ['likelihood']],
+    ['impact', ['impact']],
+    ['horizon', ['horizon']],
+    ['confidence', ['confidence']],
+    ['domain', ['domain']],
+    ['scope', ['scope']],
+    ['parentId', ['parentId', 'parent_id']],
+    ['createdAt', ['createdAt', 'created_at']],
+    ['updatedAt', ['updatedAt', 'updated_at']],
+  ]);
+  for (const key of ['description', 'hypothesis', 'approach'] as const) {
+    const value = node[key];
+    if (typeof value === 'string') {
+      out[key] = value.length > 200 ? `${value.slice(0, 200)}…` : value;
+    }
+  }
+  if (Array.isArray(node.findings) && node.findings.length > 0) {
+    out.findings = node.findings.slice(0, 3).map(f =>
+      typeof f === 'string' && f.length > 200 ? `${f.slice(0, 200)}…` : f);
+  }
+  return out;
+}
+
+/** 项目状态快照瘦身：各列表按 slimStateNode 投影；requirements 与 open_requirements 重复，只留后者 + statistics */
+export function slimProjectStateResult(result: any): any {
+  const content = Array.isArray(result?.content) ? result.content[0] : undefined;
+  if (!content || typeof content.text !== 'string') return result;
+  try {
+    const data = JSON.parse(content.text);
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (Array.isArray(v)) {
+        out[k] = v.map(item => (item && typeof item === 'object' ? slimStateNode(item as Record<string, unknown>) : item));
+      } else {
+        out[k] = v;
+      }
+    }
+    delete out.requirements;
+    content.text = JSON.stringify(snakeToCamel(out), null, 2);
+  } catch {
+    // 非 JSON 文本——保持原样
+  }
+  return result;
+}
 
 /** Wrap a tool handler with timing + error logging */
 function logged<A extends Record<string, unknown>>(
@@ -182,6 +237,8 @@ function logged<A extends Record<string, unknown>>(
         result = slimToolResult(toolName, result);
       } else if (SLIM_SEARCH_TOOLS.has(toolName)) {
         result = slimSearchToolResult(result);
+      } else if (SLIM_STATE_TOOLS.has(toolName)) {
+        result = slimProjectStateResult(result);
       }
       console.log(`[MCP] ${label} ${toolName} ${Date.now() - start}ms`);
       return result;
