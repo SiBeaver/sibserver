@@ -30,7 +30,6 @@ import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
 import { generateEmbeddings, getEmbeddingConfig } from '../embedding/client.js';
 import { snakeToCamel, camelToSnake, kebabToSnake } from './transforms.js';
-import { triggerAutoLink, AUTO_LINK_OPERATIONS } from '../auto-link/index.js';
 import { handleRequirementAccepted } from '../policies/triggers/requirement-trigger.js';
 import { handleKnowledgeRecorded } from '../policies/self-heal.js';
 import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
@@ -665,7 +664,6 @@ ${existingSummary || '（暂无）'}
       const input = await c.req.json();
       const snakeInput = camelToSnake(input);
       const result = await handler(ctx, snakeInput);
-      if (AUTO_LINK_OPERATIONS.has(snakeName)) triggerAutoLink(ctx, result);
       return json(c, result);
     } catch (e: any) {
       return json(c, { error: e.message }, 400);

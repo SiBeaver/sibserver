@@ -1,6 +1,7 @@
 import type { OperationContext } from './context.js';
 import { jsonCompletion, type ChatMessage } from '../llm-client.js';
 import type { CognitiveNode } from '../nodes/types.js';
+import { config } from '../config/index.js';
 
 export interface DistillConversationInput {
   messages?: Array<{ role: string; content: string }>;
@@ -41,7 +42,7 @@ interface RawDistillResult {
 function formatExistingNodes(nodes: CognitiveNode[]): string {
   if (nodes.length === 0) return '无';
   return nodes
-    .slice(0, 30)
+    .slice(0, 15)
     .map(n => `- [${n.id.slice(0, 8)}] (${n.type}) ${n.title}`)
     .join('\n');
 }
@@ -131,7 +132,7 @@ ${conversationText}`,
     },
   ];
 
-  const result = await jsonCompletion<RawDistillResult>(messages);
+  const result = await jsonCompletion<RawDistillResult>(messages, { model: config.llmFlashModel });
 
   const validTypes = new Set(focusTypes);
   const proposals = (result.proposals ?? []).filter(

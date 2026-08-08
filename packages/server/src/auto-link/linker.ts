@@ -5,6 +5,7 @@ import type { Edge, RelationType } from '../edges/types.js';
 import { RELATION_CONSTRAINTS, validateRelation } from '../edges/types.js';
 import { jsonCompletion, type ChatMessage } from '../llm-client.js';
 import { LINK_STRATEGIES } from './strategies.js';
+import { config } from '../config/index.js';
 
 export interface AutoLinkResult {
   node_id: string;
@@ -179,7 +180,7 @@ ${candidates.map((c, i) => `${i + 1}. [${c.type}] id=${c.id} title="${c.title}" 
   ];
 
   try {
-    const result = await jsonCompletion<LlmResponse>(messages);
+    const result = await jsonCompletion<LlmResponse>(messages, { model: config.llmFlashModel });
     return (result.links ?? []).slice(0, 5);
   } catch (err) {
     console.error('[auto-link] LLM inference failed:', err);

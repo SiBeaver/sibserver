@@ -2,7 +2,7 @@ import type { ProjectManager } from '../projects/manager.js';
 import { autoLink } from '../auto-link/linker.js';
 import { config } from '../config/index.js';
 
-const INTERVAL_MS = 5 * 60_000; // 5 minutes
+const INTERVAL_MS = 15 * 60_000; // 15 minutes
 const BATCH_PER_PROJECT = 10;
 const MIN_EDGE_THRESHOLD = 1;
 
@@ -66,7 +66,7 @@ export function startLinkRepair(manager: ProjectManager): void {
     return;
   }
 
-  console.log('[link-repair] Started (interval: 5m)');
+  console.log('[link-repair] Started (interval: 15m)');
 
   setTimeout(() => {
     repairOnce(manager).catch(err => console.error('[link-repair] Initial run error:', err));

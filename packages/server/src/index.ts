@@ -21,7 +21,7 @@ export { createSiBeaverApp, operationHandlers, type SiBeaverApp } from './api/se
 export { handleMcpRequest } from './mcp/http-server.js';
 export { startEmbedSync, getEmbedSyncStats } from './jobs/embed-sync.js';
 export { startLinkRepair, stopLinkRepair, getLinkRepairStats } from './jobs/link-repair.js';
-export { autoLink, triggerAutoLink, LINK_STRATEGIES, type AutoLinkResult } from './auto-link/index.js';
+export { autoLink, LINK_STRATEGIES, type AutoLinkResult } from './auto-link/index.js';
 
 // config
 export { config } from './config/index.js';
