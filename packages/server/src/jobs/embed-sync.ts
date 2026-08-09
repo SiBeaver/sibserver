@@ -20,7 +20,7 @@ export function getEmbedSyncStats() {
 }
 
 async function syncOnce(manager: ProjectManager): Promise<void> {
-  const projects = await manager.listProjects();
+  const projects = (await manager.listProjects()).filter(p => !p.slug.endsWith('-dev'));
   let roundGenerated = 0;
   let roundSkipped = 0;
 

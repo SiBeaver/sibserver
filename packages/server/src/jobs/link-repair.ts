@@ -21,7 +21,7 @@ export function getLinkRepairStats() {
 }
 
 async function repairOnce(manager: ProjectManager): Promise<void> {
-  const projects = await manager.listProjects();
+  const projects = (await manager.listProjects()).filter(p => !p.slug.endsWith('-dev'));
   let roundRepaired = 0;
   let roundEdges = 0;
 

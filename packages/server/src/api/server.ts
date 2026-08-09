@@ -850,7 +850,11 @@ async function start() {
 
   await manager.init();
   startEmbedSync(manager);
-  startLinkRepair(manager);
+  if (config.linkRepairEnabled) {
+    startLinkRepair(manager);
+  } else {
+    console.log('[link-repair] Disabled by LINK_REPAIR_ENABLED=false');
+  }
 
   const projectSlug = config.sibsProject || await manager.getDefaultProject();
   console.log(`[sibs] project=${projectSlug}`);
