@@ -14,14 +14,15 @@ function bomV1(): BomSnapshot {
       {
         key: 'dom/req-a',
         title: '需求A',
-        priority: 'high',
-        acceptance: [{ id: 'a1', label: '测试通过' }],
+        rules: [
+          { id: 'r-aaaa', title: '认证生效' },
+          { id: 'r-bbbb', title: '日志完整' },
+        ],
       },
       {
         key: 'dom/req-b',
         title: '需求B',
-        priority: 'medium',
-        acceptance: [{ id: 'b1', label: '文档齐备' }],
+        rules: [{ id: 'r-cccc', title: '文档齐备' }],
       },
     ],
     constraints: [
@@ -55,19 +56,21 @@ describe('Gap 引擎三方对账', () => {
     expect(ledger.gaps).toEqual([]);
   });
 
-  it('无证据数据输出缺失型（? 无数据），不误报违约', async () => {
+  it('规则无人认领输出缺失型（固定 medium），约束无证据不误报违约', async () => {
     await setBaseline(ctx, bomV1(), NOW);
     const ledger = await listGaps(ctx);
     expect(ledger.bom_commit).toBe('aaa1111');
     expect(ledger.summary.violation).toBe(0);
-    // 验收项 a1/b1 两条 + 约束 c1 无证据一条
-    expect(ledger.summary.absence).toBe(3);
+    // 三条规则无人认领 + 约束 c1 无证据一条
+    expect(ledger.summary.absence).toBe(4);
     const c1 = ledger.gaps.find(g => g.source_ref === 'c1');
     expect(c1?.kind).toBe('absence');
     expect(c1?.detail).toContain('no pattern evidence');
-    const a1 = ledger.gaps.find(g => g.source_ref === 'a1');
-    expect(a1?.detail).toBe('无证据数据');
-    expect(a1?.severity).toBe('high');
+    const rAaaa = ledger.gaps.find(g => g.source_ref === 'r-aaaa');
+    expect(rAaaa?.kind).toBe('absence');
+    expect(rAaaa?.detail).toContain('@sibom');
+    // 需求已无优先级：严重度固定 medium
+    expect(rAaaa?.severity).toBe('medium');
   });
 
   it('证据违约输出 violation，附期望 vs 实际', async () => {
@@ -82,23 +85,24 @@ describe('Gap 引擎三方对账', () => {
     expect(ledger.gaps.filter(g => g.source_ref === 'c1')).toHaveLength(1);
   });
 
-  it('差距消失的唯一路径：证据满足条件', async () => {
+  it('差距消失的唯一路径：证据满足条件（规则被认领）', async () => {
     await setBaseline(ctx, bomV1(), NOW);
     await reportEvidence(ctx, [
       { source_id: 'constraint:c1', payload: { matched: 5, total: 5 } },
-      { source_id: 'acceptance:dom/req-a#a1', payload: { passed: true } },
+      { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }, { id: 'r-bbbb', file: 'src/a.ts' }] } },
     ], LATER);
     const ledger = await listGaps(ctx);
     expect(ledger.gaps.find(g => g.source_ref === 'c1')).toBeUndefined();
-    expect(ledger.gaps.find(g => g.source_ref === 'a1')).toBeUndefined();
-    // req-b 的验收项仍缺失
-    expect(ledger.gaps.find(g => g.source_ref === 'b1')?.kind).toBe('absence');
+    expect(ledger.gaps.find(g => g.source_ref === 'r-aaaa')).toBeUndefined();
+    expect(ledger.gaps.find(g => g.source_ref === 'r-bbbb')).toBeUndefined();
+    // req-b 的规则仍无人认领
+    expect(ledger.gaps.find(g => g.source_ref === 'r-cccc')?.kind).toBe('absence');
     // 留痕：resolved 行仍在全量账本中
     const all = await ctx.gap.getAllRows();
     expect(all.filter(r => r.status === 'resolved').length).toBeGreaterThan(0);
   });
 
-  it('需求过时检测：需求键失配可发现（约束 / sibs 节点 / @bom 标签 / 在办 goal）', async () => {
+  it('需求过时检测：需求键失配可发现（约束 / sibs 节点 / @bom 标签 / 在办 goal / @sibom 悬空）', async () => {
     const bom = bomV1();
     bom.constraints.push({
       id: 'c-gone',
@@ -126,13 +130,18 @@ describe('Gap 引擎三方对账', () => {
     await setBaseline(ctx, bom, NOW);
     await reportEvidence(ctx, [
       { source_id: 'bom-tags', payload: { tags: [{ key: 'dom/dead', file: 'src/a.ts' }, { key: 'dom/req-a', file: 'src/b.ts' }] } },
+      { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-zzzz', file: 'src/x.ts' }] } },
     ], LATER);
     const ledger = await listGaps(ctx);
     const stale = ledger.gaps.filter(g => g.kind === 'staleness');
-    expect(stale.map(g => g.requirement_key).sort()).toEqual(['dom/dead', 'dom/ghost', 'dom/ghost', 'dom/gone'].sort());
+    expect(stale.map(g => g.requirement_key).sort()).toEqual(['(global)', 'dom/dead', 'dom/ghost', 'dom/ghost', 'dom/gone'].sort());
     expect(stale.find(g => g.source_ref === 'c-gone')).toBeTruthy();
     expect(stale.find(g => g.source_ref === 'goal-1')).toBeTruthy();
     expect(stale.find(g => g.source_ref === '@bom:dom/dead')?.detail).toContain('src/a.ts');
+    const staleSibom = stale.find(g => g.source_ref === '@sibom:r-zzzz');
+    expect(staleSibom).toBeTruthy();
+    expect(staleSibom?.detail).toContain('src/x.ts');
+    expect(staleSibom?.severity).toBe('medium');
   });
 
   it('goal 标注：创建在办 goal 后差距不消失，附在办标记', async () => {
@@ -200,7 +209,7 @@ describe('Gap 引擎三方对账', () => {
 
     const bom2 = bomV1();
     bom2.commit = 'bbb2222';
-    bom2.requirements[1].acceptance.push({ id: 'b2', label: '新增验收项' });
+    bom2.requirements[1].rules.push({ id: 'r-cccc2', title: '新增规则' });
     const result = await setBaseline(ctx, bom2, LATER);
     expect(result.changed_keys).toEqual(['dom/req-b']);
     expect(result.superseded).toBe(1);
@@ -245,13 +254,19 @@ describe('Gap 引擎三方对账', () => {
     await setBaseline(ctx, bomV1(), NOW);
     await reportEvidence(ctx, [
       { source_id: 'constraint:c1', payload: { matched: 2, total: 5 }, reported_at: LATER },
-      { source_id: 'acceptance:dom/req-a#a1', payload: { passed: false, detail: 'pnpm test' }, reported_at: LATER },
     ], LATER);
-    const ledger = await listGaps(ctx);
+    let ledger = await listGaps(ctx);
     expect(ledger.gaps.find(g => g.source_ref === 'c1')?.evidence_reported_at).toBe(LATER);
-    expect(ledger.gaps.find(g => g.source_ref === 'a1')?.evidence_reported_at).toBe(LATER);
-    // b1 无证据 → null
-    expect(ledger.gaps.find(g => g.source_ref === 'b1')?.evidence_reported_at).toBeNull();
+    // sibom-tags 未上报 → 规则行无证据 → null
+    expect(ledger.gaps.find(g => g.source_ref === 'r-aaaa')?.evidence_reported_at).toBeNull();
+
+    // 上报 sibom-tags 后未认领规则行带证据年龄（认领证据的时点）；已认领的 r-aaaa 消解
+    await reportEvidence(ctx, [
+      { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }] }, reported_at: LATER },
+    ], LATER);
+    ledger = await listGaps(ctx);
+    expect(ledger.gaps.find(g => g.source_ref === 'r-aaaa')).toBeUndefined();
+    expect(ledger.gaps.find(g => g.source_ref === 'r-cccc')?.evidence_reported_at).toBe(LATER);
   });
 
   it('对照视图证据聚合：files / runs / sibs_nodes 按需求键过滤', async () => {
@@ -272,8 +287,6 @@ describe('Gap 引擎三方对账', () => {
     await setBaseline(ctx, bomV1(), NOW);
     await reportEvidence(ctx, [
       { source_id: 'constraint:c1', payload: { matched: 5, total: 5 }, reported_at: LATER },
-      { source_id: 'acceptance:dom/req-a#a1', payload: { passed: true, detail: 'pnpm test' }, reported_at: LATER },
-      { source_id: 'acceptance:dom/req-b#b1', payload: { passed: false }, reported_at: LATER },
       { source_id: 'bom-tags', payload: { tags: [
         { key: 'dom/req-a', file: 'src/a.ts' },
         { key: 'dom/req-a', file: 'src/a2.ts' },
@@ -285,10 +298,10 @@ describe('Gap 引擎三方对账', () => {
     expect(scene.requirement_key).toBe('dom/req-a');
     expect(scene.files.map(f => f.path).sort()).toEqual(['src/a.ts', 'src/a2.ts']);
     expect(scene.files[0].bom_tag).toBe('@bom dom/req-a');
-    // runs：约束 c1（pass）+ 验收项 a1（pass），不含 req-b 的 b1
-    expect(scene.runs).toHaveLength(2);
-    expect(scene.runs.every(r => r.result === 'pass')).toBe(true);
-    expect(scene.runs.every(r => r.reported_at === LATER)).toBe(true);
+    // runs：仅约束 c1（pass），验收项证据已退役
+    expect(scene.runs).toHaveLength(1);
+    expect(scene.runs[0].result).toBe('pass');
+    expect(scene.runs[0].reported_at).toBe(LATER);
     // sibs_nodes：需求节点 + 相邻 decision
     expect(scene.sibs_nodes.map(n => n.id).sort()).toEqual(['dec-1', 'req-node-a']);
 

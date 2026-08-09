@@ -58,22 +58,24 @@ async function computeDesiredGaps(
   const bomKeys = new Set(bom.requirements.map(r => r.key));
   const inScope = (key: string) => scope === null || scope.has(key);
 
-  // Step 1: 验收项对账 → 缺失
+  // Step 1: 规则认领对账 → 缺失（BOM 业务规则无人 @sibom 认领）
+  const sibomEv = await ctx.gap.getEvidence('sibom-tags');
+  const claimedRules = new Set(
+    (sibomEv?.payload as { rules?: Array<{ id: string }> } | undefined)?.rules?.map(r => r.id) ?? [],
+  );
   for (const req of bom.requirements) {
     if (!inScope(req.key)) continue;
-    for (const item of req.acceptance) {
-      const ev = await ctx.gap.getEvidence(`acceptance:${req.key}#${item.id}`);
-      const passed = ev !== null && (ev.payload as { passed?: boolean }).passed === true;
-      if (passed) continue;
+    for (const rule of req.rules ?? []) {
+      if (claimedRules.has(rule.id)) continue;
       gaps.push({
         requirement_key: req.key,
         kind: 'absence',
-        title: `验收项「${item.label}」未满足`,
-        detail: ev === null ? '无证据数据' : '证据未通过',
-        severity: req.priority,
-        source_ref: item.id,
-        condition_fingerprint: fingerprint({ t: 'acceptance', key: req.key, item: item.id, label: item.label }),
-        evidence_fingerprint: ev?.fingerprint ?? null,
+        title: `规则「${rule.title}」无人认领`,
+        detail: 'BOM 业务规则没有 @sibom 认领（代码未自报归属）',
+        severity: 'medium',
+        source_ref: rule.id,
+        condition_fingerprint: fingerprint({ t: 'rule', key: req.key, rule: rule.id, title: rule.title }),
+        evidence_fingerprint: sibomEv?.fingerprint ?? null,
       });
     }
   }
@@ -165,6 +167,30 @@ async function computeDesiredGaps(
         severity: 'medium',
         source_ref: `@bom:${key}`,
         condition_fingerprint: fingerprint({ t: 'stale-tag', key }),
+        evidence_fingerprint: fingerprint(files),
+      });
+    }
+  }
+
+  if (sibomEv) {
+    const rules = ((sibomEv.payload as { rules?: Array<{ id: string; file: string }> }).rules ?? []);
+    const knownRules = new Set(bom.requirements.flatMap(r => (r.rules ?? []).map(x => x.id)));
+    const staleByRule = new Map<string, string[]>();
+    for (const rule of rules) {
+      if (knownRules.has(rule.id)) continue;
+      const files = staleByRule.get(rule.id) ?? [];
+      files.push(rule.file);
+      staleByRule.set(rule.id, files);
+    }
+    for (const [ruleId, files] of staleByRule) {
+      gaps.push({
+        requirement_key: GLOBAL_KEY,
+        kind: 'staleness',
+        title: `代码 @sibom 认领指向不存在的规则`,
+        detail: `${ruleId} — ${files.join(', ')}`,
+        severity: 'medium',
+        source_ref: `@sibom:${ruleId}`,
+        condition_fingerprint: fingerprint({ t: 'stale-sibom', rule: ruleId }),
         evidence_fingerprint: fingerprint(files),
       });
     }
@@ -363,14 +389,11 @@ export async function reportEvidence(
       reported_at: item.reported_at ?? now,
     });
     accepted++;
-    const acceptanceMatch = item.source_id.match(/^acceptance:(.+)#[^#]+$/);
     const constraintMatch = item.source_id.match(/^constraint:(.+)$/);
-    if (acceptanceMatch) {
-      affectedKeys.add(acceptanceMatch[1]);
-    } else if (constraintMatch) {
+    if (constraintMatch) {
       affectedKeys.add(constraintByIdKey.get(constraintMatch[1]) ?? GLOBAL_KEY);
     }
-    // bom-tags 等其他证据源仅影响 staleness，reconcile 时始终全量重查
+    // bom-tags / sibom-tags 等其他证据源影响 staleness 与规则认领，reconcile 时始终全量重查
   }
 
   if (accepted === 0) {
@@ -437,7 +460,7 @@ export async function listGaps(ctx: OperationContext): Promise<{
 function evidenceSourceIdOf(row: GapRowRecord, constraintIds: Set<string>): string {
   if (row.source_ref.startsWith('@bom:')) return 'bom-tags';
   if (constraintIds.has(row.source_ref)) return `constraint:${row.source_ref}`;
-  return `acceptance:${row.requirement_key}#${row.source_ref}`;
+  return 'sibom-tags';
 }
 
 // ── 对照视图证据聚合（目检数据，不产差距条目）─────────────────
@@ -462,17 +485,6 @@ export async function buildEvidenceScene(
         if (tag.key !== requirementKey) continue;
         scene.files.push({ path: tag.file, bom_tag: `@bom ${tag.key}` });
       }
-      continue;
-    }
-    const acceptanceMatch = ev.source_id.match(/^acceptance:(.+)#([^#]+)$/);
-    if (acceptanceMatch) {
-      if (acceptanceMatch[1] !== requirementKey) continue;
-      const payload = ev.payload as { passed?: boolean; detail?: string };
-      scene.runs.push({
-        label: payload.detail ?? ev.source_id,
-        result: payload.passed === true ? 'pass' : 'fail',
-        reported_at: ev.reported_at,
-      });
       continue;
     }
     const constraintMatch = ev.source_id.match(/^constraint:(.+)$/);

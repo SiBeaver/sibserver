@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { Constraint } from '../constraints/types.js';
-import { Priority } from '../nodes/types.js';
 
 // ============================================================
 // Gap 检测 — 三方对账类型
@@ -17,17 +16,16 @@ export type GapRowStatus = z.infer<typeof GapRowStatus>;
 
 // ── BOM 快照（基准上报载荷）─────────────────────────────────
 
-export const BomAcceptanceItem = z.object({
+export const BomRule = z.object({
   id: z.string(),
-  label: z.string(),
+  title: z.string(),
 });
-export type BomAcceptanceItem = z.infer<typeof BomAcceptanceItem>;
+export type BomRule = z.infer<typeof BomRule>;
 
 export const BomRequirement = z.object({
   key: z.string(),
   title: z.string(),
-  priority: Priority.default('medium'),
-  acceptance: z.array(BomAcceptanceItem).default([]),
+  rules: z.array(BomRule).default([]),
 });
 export type BomRequirement = z.infer<typeof BomRequirement>;
 
@@ -65,8 +63,8 @@ export interface GapRowRecord {
 // ── 证据（上报的资产）────────────────────────────────────────
 // source_id 约定：
 //   constraint:{constraintId}          → { matched, total } 或 { value }
-//   acceptance:{requirementKey}#{itemId} → { passed, detail? }
-//   bom-tags                            → { tags: [{ key, file }] }
+//   bom-tags                           → { tags: [{ key, file }] }（@bom 需求键认领）
+//   sibom-tags                         → { rules: [{ id, file }] }（@sibom 规则认领）
 
 export const EvidenceItemInput = z.object({
   source_id: z.string(),
