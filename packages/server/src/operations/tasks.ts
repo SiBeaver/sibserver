@@ -45,7 +45,7 @@ export async function createTask(ctx: OperationContext, input: CreateTaskInput):
   if (input.parent_goal) {
     const parent = await ctx.nodes.getById(input.parent_goal);
     if (!parent || parent.type !== 'goal') {
-      throw new Error(`Parent goal not found: ${input.parent_goal}`);
+      throw new Error(`父目标不存在：${input.parent_goal}`);
     }
     const edge: Edge = {
       id: ulid(),
@@ -85,12 +85,12 @@ export interface UpdateTaskStatusInput {
 export async function updateTaskStatus(ctx: OperationContext, input: UpdateTaskStatusInput) {
   const task = await ctx.nodes.getById(input.task_id);
   if (!task || task.type !== 'task') {
-    throw new Error(`Task not found: ${input.task_id}`);
+    throw new Error(`任务不存在：${input.task_id}`);
   }
 
   const oldStatus = task.status;
   if (!isValidTransition(TASK_TRANSITIONS, oldStatus as any, input.new_status)) {
-    throw new Error(`Invalid transition: ${oldStatus} → ${input.new_status}`);
+    throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
   }
 
   const updated: TaskNode = {

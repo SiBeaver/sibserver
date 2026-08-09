@@ -9,14 +9,14 @@ export async function generate(
 ): Promise<GeneratedProjection> {
   if (config.constitutional) {
     throw new Error(
-      `Projection "${config.type}" is marked constitutional and cannot be auto-generated. ` +
-      `Edit it directly at: ${config.outputPath ?? '(no path configured)'}`,
+      `投影「${config.type}」标记为宪法级，不能自动生成。` +
+      `请直接编辑：${config.outputPath ?? '（未配置路径）'}`,
     );
   }
 
   const template = getProjection(config.type);
   if (!template) {
-    throw new Error(`Unknown projection type: ${config.type}`);
+    throw new Error(`未知投影类型：${config.type}`);
   }
 
   return template.generate(ctx, config);

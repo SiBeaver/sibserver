@@ -17,7 +17,7 @@ export async function evaluateAcceptanceGap(
 ): Promise<AcceptanceGap> {
   const node = await ctx.nodes.getById(requirementId);
   if (!node || node.type !== 'requirement') {
-    throw new Error(`Requirement not found: ${requirementId}`);
+    throw new Error(`需求不存在：${requirementId}`);
   }
   return computeGap(node as RequirementNode);
 }

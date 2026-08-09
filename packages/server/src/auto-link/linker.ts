@@ -31,7 +31,7 @@ export async function autoLink(
   options?: { useSimilarity?: boolean },
 ): Promise<AutoLinkResult> {
   const node = await ctx.nodes.getById(nodeId);
-  if (!node) throw new Error(`Node not found: ${nodeId}`);
+  if (!node) throw new Error(`节点不存在：${nodeId}`);
 
   const strategy = LINK_STRATEGIES[node.type as NodeType];
   const existingEdges = await ctx.edges.getByNode(nodeId);

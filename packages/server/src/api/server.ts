@@ -83,7 +83,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const authMw = async (c: any, next: any) => {
       const auth = c.req.header('Authorization');
       if (auth !== `Bearer ${authToken}`) {
-        return c.json({ error: 'Unauthorized' }, 401);
+        return c.json({ error: '未授权' }, 401);
       }
       await next();
     };
@@ -132,7 +132,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/api/v1/projects/:slug', async (c) => {
     const slug = c.req.param('slug');
     const project = await manager.getProject(slug);
-    if (!project) return json(c, { error: 'Project not found' }, 404);
+    if (!project) return json(c, { error: '项目不存在' }, 404);
     return json(c, project);
   });
 
@@ -167,7 +167,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/nodes', async (c) => {
     const slug = c.req.param('project');
     const type = c.req.query('type');
-    if (!type) return json(c, { error: 'Query parameter "type" is required' }, 400);
+    if (!type) return json(c, { error: '缺少查询参数 "type"' }, 400);
     const nodes = await getCtx(slug).nodes.getByType(type as any);
     return json(c, nodes);
   });
@@ -202,16 +202,16 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/search', async (c) => {
     const slug = c.req.param('project');
     const q = c.req.query('q');
-    if (!q) return json(c, { error: 'Missing query parameter "q"' }, 400);
+    if (!q) return json(c, { error: '缺少查询参数 "q"' }, 400);
     return json(c, await getCtx(slug).nodes.search(q));
   });
 
   app.get('/:project/api/v1/search/semantic', async (c) => {
     const slug = c.req.param('project');
     const q = c.req.query('q');
-    if (!q) return json(c, { error: 'Missing query parameter "q"' }, 400);
+    if (!q) return json(c, { error: '缺少查询参数 "q"' }, 400);
     if (!getEmbeddingConfig()) {
-      return json(c, { error: 'Semantic search unavailable: EMBEDDING_API_KEY not configured' }, 503);
+      return json(c, { error: '语义搜索不可用：未配置 EMBEDDING_API_KEY' }, 503);
     }
     const topK = Math.min(Number(c.req.query('top_k')) || 10, 50);
     try {
@@ -346,7 +346,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/gap/evidence', async (c) => {
     const slug = c.req.param('project');
     const key = c.req.query('requirement_key') ?? c.req.query('requirementKey');
-    if (!key) return json(c, { error: 'requirement_key is required' }, 400);
+    if (!key) return json(c, { error: '缺少 requirement_key' }, 400);
     return json(c, await buildEvidenceScene(getCtx(slug), key));
   });
 
@@ -376,7 +376,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/projections', async (c) => {
     const slug = c.req.param('project');
     const project = await manager.getProject(slug);
-    if (!project) return json(c, { error: 'Project not found' }, 404);
+    if (!project) return json(c, { error: '项目不存在' }, 404);
     const types = await listProjectionTypes();
     const configured = (project.metadata?.projections ?? {}) as Record<string, any>;
     return json(c, {
@@ -392,7 +392,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const slug = c.req.param('project');
     const type = c.req.param('type');
     const project = await manager.getProject(slug);
-    if (!project) return json(c, { error: 'Project not found' }, 404);
+    if (!project) return json(c, { error: '项目不存在' }, 404);
     const projections = (project.metadata?.projections ?? {}) as Record<string, any>;
     const config = projections[type];
     if (!config) {
@@ -415,7 +415,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/fts', async (c) => {
     const slug = c.req.param('project');
     const q = c.req.query('q');
-    if (!q) return json(c, { error: 'Missing query parameter "q"' }, 400);
+    if (!q) return json(c, { error: '缺少查询参数 "q"' }, 400);
     return json(c, await fullTextSearch(getCtx(slug), q));
   });
 
@@ -425,7 +425,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const slug = c.req.param('project');
     const body = await c.req.json();
     const { text, domain, source } = body as { text: string; domain?: string; source?: string };
-    if (!text) return json(c, { error: 'Missing "text" field' }, 400);
+    if (!text) return json(c, { error: '缺少 "text" 字段' }, 400);
 
     const ctx = getCtx(slug);
     const treeResult = await getKnowledgeTree(ctx);
@@ -575,7 +575,7 @@ ${existingSummary || '（暂无）'}
       action?: 'chat' | 'save';
     };
     if (!userMessages || !Array.isArray(userMessages)) {
-      return json(c, { error: 'Missing "messages" array' }, 400);
+      return json(c, { error: '缺少 "messages" 数组' }, 400);
     }
 
     const ctx = getCtx(slug);
@@ -703,7 +703,7 @@ ${existingSummary || '（暂无）'}
   app.post('/api/v1/policies/from-requirement', async (c) => {
     const body = await c.req.json();
     const requirementId = body.requirementId;
-    if (!requirementId) return c.json({ error: 'requirementId is required' }, 400);
+    if (!requirementId) return c.json({ error: '缺少 requirementId' }, 400);
 
     const fakeEvent = {
       id: crypto.randomUUID(),
@@ -728,14 +728,14 @@ ${existingSummary || '（暂无）'}
   app.post('/api/v1/distill/refine', async (c) => {
     const body = await c.req.json();
     const { requirementId, message } = body;
-    if (!requirementId) return c.json({ error: 'requirementId is required' }, 400);
-    if (!message) return c.json({ error: 'message is required' }, 400);
+    if (!requirementId) return c.json({ error: '缺少 requirementId' }, 400);
+    if (!message) return c.json({ error: '缺少 message' }, 400);
 
     const { sibs } = await import('../sibs-client.js');
     const { chatCompletion } = await import('../llm-client.js');
     const ctx = await sibs.getNodeContext(requirementId);
     const node = ctx.node as any;
-    if (!node) return c.json({ error: 'requirement not found' }, 404);
+    if (!node) return c.json({ error: '需求不存在' }, 404);
 
     const state = await sibs.getProjectState();
 
@@ -771,13 +771,13 @@ ${state.requirements.filter((r: any) => r.id !== requirementId).map((r: any) => 
   app.post('/api/v1/distill/check-conflicts', async (c) => {
     const body = await c.req.json();
     const { requirementId } = body;
-    if (!requirementId) return c.json({ error: 'requirementId is required' }, 400);
+    if (!requirementId) return c.json({ error: '缺少 requirementId' }, 400);
 
     const { sibs } = await import('../sibs-client.js');
     const { chatCompletion } = await import('../llm-client.js');
     const ctx = await sibs.getNodeContext(requirementId);
     const node = ctx.node as any;
-    if (!node) return c.json({ error: 'requirement not found' }, 404);
+    if (!node) return c.json({ error: '需求不存在' }, 404);
 
     const state = await sibs.getProjectState();
     const others = state.requirements.filter(
@@ -811,7 +811,7 @@ ${others.map((r: any) => `- [${r.id.slice(0, 8)}] ${r.title}: ${r.description ||
       const parsed = JSON.parse(result.content);
       return c.json({ requirementId, ...parsed });
     } catch {
-      return c.json({ requirementId, conflicts: [], error: 'LLM parse failed' });
+      return c.json({ requirementId, conflicts: [], error: 'LLM 解析失败' });
     }
   });
 

@@ -12,7 +12,7 @@ export interface GenerateProjectionInput {
 export async function generateProjection(ctx: OperationContext, input: GenerateProjectionInput) {
   const config = input.config;
   if (!config) {
-    throw new Error(`Projection config for type "${input.type}" not provided`);
+    throw new Error(`投影类型「${input.type}」的配置未提供`);
   }
 
   const result = await generate(ctx, config);

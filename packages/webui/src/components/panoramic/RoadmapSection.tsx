@@ -36,14 +36,14 @@ function RoadmapNode({ item, depth }: { item: RoadmapItem; depth: number }) {
 export function RoadmapSection({ roadmap }: RoadmapSectionProps) {
   if (!roadmap.length) {
     return (
-      <Card title="Roadmap" size="small">
+      <Card title="路线图" size="small">
         <EmptyState title="暂无目标" description="还没有定义任何目标" />
       </Card>
     );
   }
 
   return (
-    <Card title="Roadmap" size="small">
+    <Card title="路线图" size="small">
       <Space direction="vertical" style={{ width: '100%' }} size={4}>
         {roadmap.map(item => (
           <RoadmapNode key={item.node.id} item={item} depth={0} />

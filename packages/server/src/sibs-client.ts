@@ -54,7 +54,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`SIBS ${opts.method || "GET"} ${path} → ${res.status}: ${text}`);
+    throw new Error(`SIBS ${opts.method || "GET"} ${path} → ${res.status}：${text}`);
   }
   return res.json() as Promise<T>;
 }

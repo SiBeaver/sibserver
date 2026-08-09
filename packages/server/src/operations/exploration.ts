@@ -84,10 +84,10 @@ export interface RecordFindingInput {
 export async function recordExplorationFinding(ctx: OperationContext, input: RecordFindingInput) {
   const node = await ctx.nodes.getById(input.exploration_id);
   if (!node || node.type !== 'exploration') {
-    throw new Error(`Exploration not found: ${input.exploration_id}`);
+    throw new Error(`探索不存在：${input.exploration_id}`);
   }
   if (node.status !== 'active') {
-    throw new Error(`Exploration is not active: ${node.status}`);
+    throw new Error(`探索不在活跃状态：${node.status}`);
   }
 
   const exploration = node as ExplorationNode;
@@ -147,10 +147,10 @@ export interface ConcludeExplorationInput {
 export async function concludeExploration(ctx: OperationContext, input: ConcludeExplorationInput) {
   const node = await ctx.nodes.getById(input.exploration_id);
   if (!node || node.type !== 'exploration') {
-    throw new Error(`Exploration not found: ${input.exploration_id}`);
+    throw new Error(`探索不存在：${input.exploration_id}`);
   }
   if (node.status !== 'active') {
-    throw new Error(`Exploration is not active: ${node.status}`);
+    throw new Error(`探索不在活跃状态：${node.status}`);
   }
 
   const now = new Date().toISOString();
@@ -244,10 +244,10 @@ export interface AbandonExplorationInput {
 export async function abandonExploration(ctx: OperationContext, input: AbandonExplorationInput) {
   const node = await ctx.nodes.getById(input.exploration_id);
   if (!node || node.type !== 'exploration') {
-    throw new Error(`Exploration not found: ${input.exploration_id}`);
+    throw new Error(`探索不存在：${input.exploration_id}`);
   }
   if (node.status !== 'active') {
-    throw new Error(`Exploration is not active: ${node.status}`);
+    throw new Error(`探索不在活跃状态：${node.status}`);
   }
 
   const now = new Date().toISOString();

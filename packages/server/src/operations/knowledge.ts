@@ -105,7 +105,7 @@ export interface UpdateKnowledgeInput {
 export async function updateKnowledge(ctx: OperationContext, input: UpdateKnowledgeInput) {
   const node = await ctx.nodes.getById(input.knowledge_id);
   if (!node || node.type !== 'knowledge') {
-    throw new Error(`Knowledge node ${input.knowledge_id} not found`);
+    throw new Error(`知识节点不存在：${input.knowledge_id}`);
   }
 
   const now = new Date().toISOString();
@@ -198,16 +198,16 @@ export async function getKnowledgeTree(ctx: OperationContext) {
 
 export async function pinKnowledge(ctx: OperationContext, input: { knowledge_id: string; pinned: boolean }) {
   const node = await ctx.nodes.getById(input.knowledge_id);
-  if (!node || node.type !== 'knowledge') throw new Error('Knowledge node not found');
+  if (!node || node.type !== 'knowledge') throw new Error('知识节点不存在');
   await ctx.nodes.updatePinned(input.knowledge_id, input.pinned);
   return { id: input.knowledge_id, pinned: input.pinned };
 }
 
 export async function moveKnowledge(ctx: OperationContext, input: { knowledge_id: string; parent_id: string | null; sort_order?: number }) {
   const node = await ctx.nodes.getById(input.knowledge_id);
-  if (!node || node.type !== 'knowledge') throw new Error('Knowledge node not found');
+  if (!node || node.type !== 'knowledge') throw new Error('知识节点不存在');
   if ((node as KnowledgeNode).pinned && input.parent_id !== (node as any).parent_id) {
-    throw new Error('Cannot move a pinned knowledge node. Unpin it first.');
+    throw new Error('不能移动已固定的知识节点，请先取消固定');
   }
   await ctx.nodes.updateParent(input.knowledge_id, input.parent_id, input.sort_order);
   return { id: input.knowledge_id, parent_id: input.parent_id };

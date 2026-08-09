@@ -57,7 +57,7 @@ export async function getRoadmap(ctx: OperationContext, input: GetRoadmapInput =
 
   if (input.root_goal) {
     const tree = await buildTree(input.root_goal, 0);
-    if (!tree) throw new Error(`Goal not found: ${input.root_goal}`);
+    if (!tree) throw new Error(`目标不存在：${input.root_goal}`);
     return { roadmap: [tree] };
   }
 
@@ -142,7 +142,7 @@ export async function decisionTrail(ctx: OperationContext, nodeId: string) {
   }
 
   const rootNode = await ctx.nodes.getById(nodeId);
-  if (!rootNode) throw new Error(`Node not found: ${nodeId}`);
+  if (!rootNode) throw new Error(`节点不存在：${nodeId}`);
 
   await trace(nodeId);
   return { root: rootNode, trail };

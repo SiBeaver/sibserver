@@ -96,7 +96,7 @@ export async function decomposeGoal(ctx: OperationContext, input: DecomposeGoalI
   const now = new Date().toISOString();
   const parent = await ctx.nodes.getById(input.goal_id);
   if (!parent || parent.type !== 'goal') {
-    throw new Error(`Goal not found: ${input.goal_id}`);
+    throw new Error(`目标不存在：${input.goal_id}`);
   }
 
   const sub_goals_created: GoalNode[] = [];
@@ -170,12 +170,12 @@ export interface UpdateGoalStatusInput {
 export async function updateGoalStatus(ctx: OperationContext, input: UpdateGoalStatusInput) {
   const goal = await ctx.nodes.getById(input.goal_id);
   if (!goal || goal.type !== 'goal') {
-    throw new Error(`Goal not found: ${input.goal_id}`);
+    throw new Error(`目标不存在：${input.goal_id}`);
   }
 
   const oldStatus = goal.status;
   if (!isValidTransition(GOAL_TRANSITIONS, oldStatus as any, input.new_status)) {
-    throw new Error(`Invalid transition: ${oldStatus} → ${input.new_status}`);
+    throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
   }
 
   const updated: GoalNode = {

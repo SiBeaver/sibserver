@@ -17,14 +17,14 @@ export interface LinkNodesInput {
 
 export async function linkNodes(ctx: OperationContext, input: LinkNodesInput) {
   const source = await ctx.nodes.getById(input.source_id);
-  if (!source) throw new Error(`Source node not found: ${input.source_id}`);
+  if (!source) throw new Error(`源节点不存在：${input.source_id}`);
 
   const target = await ctx.nodes.getById(input.target_id);
-  if (!target) throw new Error(`Target node not found: ${input.target_id}`);
+  if (!target) throw new Error(`目标节点不存在：${input.target_id}`);
 
   if (!validateRelation(input.relation, source.type as NodeType, target.type as NodeType)) {
     throw new Error(
-      `Invalid relation "${input.relation}" between ${source.type} → ${target.type}`
+      `无效关系「${input.relation}」：${source.type} → ${target.type}`
     );
   }
 
@@ -67,7 +67,7 @@ export interface DeleteNodeInput {
 
 export async function deleteNode(ctx: OperationContext, input: DeleteNodeInput) {
   const node = await ctx.nodes.getById(input.node_id);
-  if (!node) throw new Error(`Node not found: ${input.node_id}`);
+  if (!node) throw new Error(`节点不存在：${input.node_id}`);
 
   // 删除所有关联边
   const edges = await ctx.edges.getByNode(input.node_id);
@@ -138,7 +138,7 @@ export async function getProjectState(ctx: OperationContext) {
 
 export async function getNodeContext(ctx: OperationContext, nodeId: string, includeEvents = true) {
   const node = await ctx.nodes.getById(nodeId);
-  if (!node) throw new Error(`Node not found: ${nodeId}`);
+  if (!node) throw new Error(`节点不存在：${nodeId}`);
 
   const edges = await ctx.edges.getByNode(nodeId);
   const neighborIds = new Set<string>();

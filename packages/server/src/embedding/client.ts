@@ -35,7 +35,7 @@ export function getEmbeddingConfig(): EmbeddingConfig | null {
  */
 export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   const config = getEmbeddingConfig();
-  if (!config) throw new Error('Embedding not configured: EMBEDDING_API_KEY not set');
+  if (!config) throw new Error('嵌入服务未配置：未设置 EMBEDDING_API_KEY');
   if (texts.length === 0) return [];
 
   // API batch limit: 32 per request
@@ -59,7 +59,7 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`Embedding API error ${res.status}: ${body}`);
+      throw new Error(`嵌入 API 错误 ${res.status}：${body}`);
     }
 
     const json = await res.json() as EmbeddingResponse;

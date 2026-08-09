@@ -76,7 +76,7 @@ export interface UpdateRiskInput {
 export async function updateRisk(ctx: OperationContext, input: UpdateRiskInput) {
   const node = await ctx.nodes.getById(input.risk_id);
   if (!node || node.type !== 'risk') {
-    throw new Error(`Risk not found: ${input.risk_id}`);
+    throw new Error(`风险不存在：${input.risk_id}`);
   }
 
   const risk = node as RiskNode;
@@ -84,7 +84,7 @@ export async function updateRisk(ctx: OperationContext, input: UpdateRiskInput) 
 
   if (input.new_status && input.new_status !== risk.status) {
     if (!isValidTransition(RISK_TRANSITIONS, risk.status, input.new_status)) {
-      throw new Error(`Invalid transition: ${risk.status} → ${input.new_status}`);
+      throw new Error(`无效状态迁移：${risk.status} → ${input.new_status}`);
     }
     diffs.push({ field: 'status', old_value: risk.status, new_value: input.new_status });
   }

@@ -11,7 +11,7 @@ interface DecomposeResult {
 export async function decomposeRequirement(requirementId: string): Promise<{ goalId: string }> {
   const ctx = await sibs.getNodeContext(requirementId);
   const node = ctx.node as ApiRequirementNode | null;
-  if (!node) throw new Error(`Requirement ${requirementId} not found`);
+  if (!node) throw new Error(`需求不存在：${requirementId}`);
 
   const messages: ChatMessage[] = [
     {

@@ -50,7 +50,7 @@ describe('Gap 引擎三方对账', () => {
   });
 
   it('未设基准时 reconcile 报错，listGaps 返回空账单', async () => {
-    await expect(reconcile(ctx)).rejects.toThrow(/No baseline/);
+    await expect(reconcile(ctx)).rejects.toThrow(/未设基准/);
     const ledger = await listGaps(ctx);
     expect(ledger.bom_commit).toBeNull();
     expect(ledger.gaps).toEqual([]);

@@ -248,7 +248,7 @@ export async function reconcile(
   now: string = new Date().toISOString(),
 ): Promise<ReconcileResult> {
   const baseline = await ctx.gap.getBaseline();
-  if (!baseline) throw new Error('No baseline set — report BOM snapshot first');
+  if (!baseline) throw new Error('未设基准——请先上报 BOM 快照');
 
   const desired = await computeDesiredGaps(ctx, baseline.bom, scope);
   const openRows = await ctx.gap.getOpenRows();
@@ -365,7 +365,7 @@ export async function reportEvidence(
   now: string = new Date().toISOString(),
 ): Promise<EvidenceReportResult> {
   const baseline = await ctx.gap.getBaseline();
-  if (!baseline) throw new Error('No baseline set — report BOM snapshot first');
+  if (!baseline) throw new Error('未设基准——请先上报 BOM 快照');
 
   const affectedKeys = new Set<string>();
   let accepted = 0;

@@ -33,13 +33,13 @@ export async function batchOperations(
   handlers: OperationHandlerMap,
 ): Promise<{ results: BatchResultItem[]; summary: { total: number; succeeded: number; failed: number } }> {
   if (!input.operations || !Array.isArray(input.operations)) {
-    throw new Error('operations must be a non-empty array');
+    throw new Error('operations 必须是非空数组');
   }
   if (input.operations.length === 0) {
-    throw new Error('operations array cannot be empty');
+    throw new Error('operations 数组不能为空');
   }
   if (input.operations.length > 50) {
-    throw new Error('batch size limit: max 50 operations per call');
+    throw new Error('批量大小上限：单次最多 50 个操作');
   }
 
   const results: BatchResultItem[] = [];

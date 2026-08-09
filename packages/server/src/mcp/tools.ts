@@ -358,7 +358,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
   }));
 
   // --- 任务 ---
-  server.tool('create_task', '创建一个任务（粒度：一个可交付的工作单元，如 feature/bugfix/spike，不是执行步骤）', {
+  server.tool('create_task', '创建一个任务（粒度：一个可交付的工作单元，如功能/缺陷修复/技术预研，不是执行步骤）', {
     title: z.string().describe('任务标题'),
     description: z.string().optional().describe('详细描述'),
     priority: z.enum(['critical', 'high', 'medium', 'low']).optional().describe('优先级'),
@@ -495,7 +495,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await updateRequirementAcceptance(getCtx(), args));
   }));
 
-  server.tool('evaluate_gap', '三方对账差距账单（violation/absence/staleness 三型 + goal 标注 + 豁免）；未设基准时回退验收项对账', {
+  server.tool('evaluate_gap', '三方对账差距账单（违约/缺失/需求过时三型 + 在办 goal 标注 + 豁免）；未设基准时回退验收项对账', {
     requirement_id: z.string().optional().describe('需求 ID（仅未设基准的回退模式使用）'),
   }, log('evaluate_gap', async (args) => {
     const c = getCtx();
@@ -507,7 +507,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult({ ...ledger, acceptance_gaps: await evaluateAllAcceptanceGaps(c) });
   }));
 
-  server.tool('evaluate_constraint', '评估约束是否满足（需要提供 evidence 数据）', {
+  server.tool('evaluate_constraint', '评估约束是否满足（需要提供证据数据）', {
     constraints: z.array(z.object({
       id: z.string().describe('约束 ID'),
       title: z.string().describe('约束名称'),
@@ -704,7 +704,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     const projections = (meta?.projections ?? {}) as Record<string, any>;
     const config = projections[args.type];
     if (!config) {
-      throw new Error(`No projection config found for type "${args.type}". Configure it in project metadata.`);
+      throw new Error(`投影类型「${args.type}」未配置。请在项目元数据中配置。`);
     }
     return jsonResult(await generateProjection(getCtx(), { type: args.type, config }));
   }));
@@ -802,7 +802,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
   }));
 
   // --- 任务 ---
-  server.tool('create_task', '创建一个任务（粒度：一个可交付的工作单元，如 feature/bugfix/spike，不是执行步骤）', {
+  server.tool('create_task', '创建一个任务（粒度：一个可交付的工作单元，如功能/缺陷修复/技术预研，不是执行步骤）', {
     project: projectParam,
     title: z.string().describe('任务标题'),
     description: z.string().optional().describe('详细描述'),
@@ -949,7 +949,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await updateRequirementAcceptance(await ctx(project), args));
   }));
 
-  server.tool('evaluate_gap', '三方对账差距账单（violation/absence/staleness 三型 + goal 标注 + 豁免）；未设基准时回退验收项对账', {
+  server.tool('evaluate_gap', '三方对账差距账单（违约/缺失/需求过时三型 + 在办 goal 标注 + 豁免）；未设基准时回退验收项对账', {
     project: projectParam,
     requirement_id: z.string().optional().describe('需求 ID（仅未设基准的回退模式使用）'),
   }, log('evaluate_gap', async ({ project, ...args }) => {
@@ -962,7 +962,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult({ ...ledger, acceptance_gaps: await evaluateAllAcceptanceGaps(c) });
   }));
 
-  server.tool('evaluate_constraint', '评估约束是否满足（需要提供 evidence 数据）', {
+  server.tool('evaluate_constraint', '评估约束是否满足（需要提供证据数据）', {
     project: projectParam,
     constraints: z.array(z.object({
       id: z.string().describe('约束 ID'),
@@ -1151,7 +1151,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     const projections = (proj?.metadata?.projections ?? {}) as Record<string, any>;
     const config = projections[type];
     if (!config) {
-      throw new Error(`No projection config found for type "${type}". Configure it in project metadata.`);
+      throw new Error(`投影类型「${type}」未配置。请在项目元数据中配置。`);
     }
     return jsonResult(await generateProjection(await ctx(slug), { type, config }));
   }));

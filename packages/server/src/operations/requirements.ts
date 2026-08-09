@@ -44,7 +44,7 @@ export async function defineRequirement(ctx: OperationContext, input: DefineRequ
   if (input.parent_goal) {
     const goal = await ctx.nodes.getById(input.parent_goal);
     if (!goal || goal.type !== 'goal') {
-      throw new Error(`Parent goal not found: ${input.parent_goal}`);
+      throw new Error(`父目标不存在：${input.parent_goal}`);
     }
     const edge: Edge = {
       id: ulid(), source_id: requirement.id, target_id: input.parent_goal,
@@ -79,7 +79,7 @@ export interface UpdateRequirementStatusInput {
 export async function updateRequirementStatus(ctx: OperationContext, input: UpdateRequirementStatusInput) {
   const node = await ctx.nodes.getById(input.requirement_id);
   if (!node || node.type !== 'requirement') {
-    throw new Error(`Requirement not found: ${input.requirement_id}`);
+    throw new Error(`需求不存在：${input.requirement_id}`);
   }
 
   const requirement = node as RequirementNode;
@@ -88,11 +88,11 @@ export async function updateRequirementStatus(ctx: OperationContext, input: Upda
   if (input.new_status === 'deprecated') {
     // deprecated can be reached from any non-terminal state
     if (oldStatus === 'satisfied' || oldStatus === 'deprecated') {
-      throw new Error(`Invalid transition: ${oldStatus} → ${input.new_status}`);
+      throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
     }
   } else {
     if (!isValidTransition(REQUIREMENT_TRANSITIONS, oldStatus, input.new_status)) {
-      throw new Error(`Invalid transition: ${oldStatus} → ${input.new_status}`);
+      throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
     }
   }
 
@@ -136,7 +136,7 @@ export interface UpdateRequirementAcceptanceInput {
 export async function updateRequirementAcceptance(ctx: OperationContext, input: UpdateRequirementAcceptanceInput) {
   const node = await ctx.nodes.getById(input.requirement_id);
   if (!node || node.type !== 'requirement') {
-    throw new Error(`Requirement not found: ${input.requirement_id}`);
+    throw new Error(`需求不存在：${input.requirement_id}`);
   }
 
   const requirement = node as RequirementNode;
