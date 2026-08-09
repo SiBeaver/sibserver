@@ -1,3 +1,4 @@
+// @sibom r-q4x8
 import type { OperationContext } from '../../operations/context.js';
 import type {
   GoalNode,

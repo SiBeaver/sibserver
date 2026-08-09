@@ -1,3 +1,4 @@
+// @sibom r-b8fp
 import type { OperationContext } from '../../operations/context.js';
 import type { DecisionNode } from '../../nodes/types.js';
 import type { ProjectionTemplate, GeneratedProjection, ProjectionConfigEntry } from '../types.js';
