@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { OperationContext } from '@sibeaver/core';
 import { registerTools, slimEnvelope, slimSearchResult, slimBatchResult, slimProjectStateResult } from '../src/mcp/tools.js';
-import { createTestSql } from '../../core/tests/helpers/test-db.js';
+import { createTestDb } from '../../core/tests/helpers/test-db.js';
 
 // MCP 响应瘦身：写操作只回执确认字段，搜索截断 description
 //（每次 MCP 调用都进 agent 上下文，全量回显是 token 浪费源）
@@ -23,9 +23,9 @@ describe('MCP 响应瘦身', () => {
   let handlers: Record<string, (args: any) => Promise<unknown>>;
   let close: () => void;
 
-  beforeEach(() => {
-    const db = createTestSql();
-    ctx = new OperationContext(db.sql, 'smoke');
+  beforeEach(async () => {
+    const db = await createTestDb();
+    ctx = new OperationContext(db.sql, 'default');
     close = db.close;
     handlers = captureHandlers(ctx);
   });
@@ -131,5 +131,5 @@ describe('MCP 响应瘦身', () => {
     expect(data.statistics).toEqual({ totalRequirements: 1 });
   });
 
-  afterEach(() => close());
+  afterEach(async () => { await close(); });
 });

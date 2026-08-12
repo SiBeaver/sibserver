@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createTestSql } from './helpers/test-db.js';
+import { createTestDb } from './helpers/test-db.js';
 import type { Sql } from '../src/storage/db.js';
 import { OperationContext } from '../src/operations/context.js';
 import {
@@ -18,15 +18,15 @@ describe('Query Operations', () => {
   let close: () => void;
   let ctx: OperationContext;
 
-  beforeEach(() => {
-    const test = createTestSql();
+  beforeEach(async () => {
+    const test = await createTestDb();
     sql = test.sql;
     close = test.close;
     ctx = new OperationContext(sql, 'default');
   });
 
-  afterEach(() => {
-    close();
+  afterEach(async () => {
+    await close();
   });
 
   // ============================================================
@@ -246,8 +246,7 @@ describe('Query Operations', () => {
   // ============================================================
 
   describe('fullTextSearch', () => {
-    // 依赖 PostgreSQL 全文搜索（search_vector @@ to_tsquery），sqlite 测试 shim 不支持——PG 集成验证另行覆盖
-    it.skip('应该搜索节点标题和描述', async () => {
+    it('应该搜索节点标题和描述', async () => {
       await defineGoal(ctx, { title: 'WebSocket 重连', horizon: 'short', priority: 'high' });
       await createTask(ctx, { title: '普通任务' });
 
@@ -256,7 +255,7 @@ describe('Query Operations', () => {
       expect(result.results[0].title).toContain('WebSocket');
     });
 
-    it.skip('应该返回空结果', async () => {
+    it('应该返回空结果', async () => {
       const result = await fullTextSearch(ctx, '不存在的关键词xyz');
       expect(result.count).toBe(0);
       expect(result.results).toHaveLength(0);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createTestSql } from './helpers/test-db.js';
+import { createTestDb } from './helpers/test-db.js';
 import type { Sql } from '../src/storage/db.js';
 import { OperationContext } from '../src/operations/context.js';
 import {
@@ -17,15 +17,15 @@ describe('Operations Layer', () => {
   let close: () => void;
   let ctx: OperationContext;
 
-  beforeEach(() => {
-    const test = createTestSql();
+  beforeEach(async () => {
+    const test = await createTestDb();
     sql = test.sql;
     close = test.close;
     ctx = new OperationContext(sql, 'default');
   });
 
-  afterEach(() => {
-    close();
+  afterEach(async () => {
+    await close();
   });
 
   // ============================================================

@@ -3,5 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/storage.test.ts', 'tests/operations.test.ts', 'tests/queries.test.ts'],
+    // 测试共享远端 PG 库 sibeaver_test——串行执行避免 truncate 冲突
+    fileParallelism: false,
   },
 });

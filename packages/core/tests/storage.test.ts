@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createTestSql } from './helpers/test-db.js';
+import { createTestDb } from './helpers/test-db.js';
 import { NodeStore, EdgeStore, EventStore } from '../src/storage/stores.js';
 import type { Sql } from '../src/storage/db.js';
 import { ulid } from 'ulidx';
@@ -14,8 +14,8 @@ describe('Storage Layer', () => {
   let edges: EdgeStore;
   let events: EventStore;
 
-  beforeEach(() => {
-    const test = createTestSql();
+  beforeEach(async () => {
+    const test = await createTestDb();
     sql = test.sql;
     close = test.close;
     nodes = new NodeStore(sql, PROJECT_ID);
@@ -23,8 +23,8 @@ describe('Storage Layer', () => {
     events = new EventStore(sql, PROJECT_ID);
   });
 
-  afterEach(() => {
-    close();
+  afterEach(async () => {
+    await close();
   });
 
   describe('NodeStore', () => {

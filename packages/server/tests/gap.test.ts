@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createTestSql } from '../../core/tests/helpers/test-db.js';
+import { createTestDb } from '../../core/tests/helpers/test-db.js';
 import { OperationContext } from '@sibeaver/core';
 import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene } from '../src/gap/engine.js';
 import type { BomSnapshot } from '@sibeaver/core';
@@ -41,10 +41,10 @@ function bomV1(): BomSnapshot {
 
 describe('Gap 引擎三方对账', () => {
   let ctx: OperationContext;
-  let close: () => void;
+  let close: () => Promise<void>;
 
-  beforeEach(() => {
-    const t = createTestSql();
+  beforeEach(async () => {
+    const t = await createTestDb();
     ctx = new OperationContext(t.sql, 'default');
     close = t.close;
   });

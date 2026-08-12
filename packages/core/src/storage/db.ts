@@ -4,7 +4,7 @@ import postgres from 'postgres';
 // PostgreSQL 连接池 + Schema 初始化
 // ============================================================
 
-const SCHEMA_SQL = `
+export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS projects (
   slug TEXT PRIMARY KEY,
   name TEXT NOT NULL,
