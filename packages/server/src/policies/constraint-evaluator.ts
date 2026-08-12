@@ -1,4 +1,4 @@
-import type { OperationContext } from '../operations/context.js';
+import type { OperationContext } from '@sibeaver/core';
 import type {
   Constraint,
   ConstraintResult,
@@ -8,7 +8,7 @@ import type {
   CodePatternCondition,
   TestResultCondition,
   SibsQueryCondition,
-} from '../constraints/types.js';
+} from '@sibeaver/core';
 
 const NODE_TYPE_MAP: Record<string, string> = {
   goals: 'goal',

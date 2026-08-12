@@ -1,6 +1,6 @@
-import type { OperationContext } from './context.js';
+import type { OperationContext } from '@sibeaver/core';
 import { jsonCompletion, type ChatMessage } from '../llm-client.js';
-import type { CognitiveNode } from '../nodes/types.js';
+import type { CognitiveNode } from '@sibeaver/core';
 import { config } from '../config/index.js';
 
 export interface DistillConversationInput {

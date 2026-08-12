@@ -1,6 +1,6 @@
 // @sibom r-b8fp
-import type { OperationContext } from '../../operations/context.js';
-import type { DecisionNode } from '../../nodes/types.js';
+import type { OperationContext } from '@sibeaver/core';
+import type { DecisionNode } from '@sibeaver/core';
 import type { ProjectionTemplate, GeneratedProjection, ProjectionConfigEntry } from '../types.js';
 
 function slugify(title: string): string {

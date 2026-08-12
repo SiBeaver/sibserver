@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ProjectionContext } from '../context.js';
+import type { ProjectionContext } from '@sibeaver/core';
 
 // ============================================================
 // Projection config — stored in ProjectMeta.metadata.projections

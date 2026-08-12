@@ -1,6 +1,6 @@
 import { sibs } from '../../sibs-client.js';
 import type { ApiEvent } from '../../api-types.js';
-import { saveRun, updateRun, type WorkflowRun } from '../../storage/run-store.js';
+import { saveRun, updateRun, type WorkflowRun } from '@sibeaver/core';
 import { runGovernance } from '../governance.js';
 import { decomposeRequirement } from '../decompose.js';
 

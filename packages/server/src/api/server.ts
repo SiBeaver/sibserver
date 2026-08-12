@@ -34,9 +34,9 @@ import { handleRequirementAccepted } from '../policies/triggers/requirement-trig
 import { handleKnowledgeRecorded } from '../policies/self-heal.js';
 import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
 import { evaluateConstraints, summarizeResults } from '../policies/constraint-evaluator.js';
-import type { Constraint, EvidenceInput } from '../constraints/types.js';
+import type { Constraint, EvidenceInput } from '@sibeaver/core';
 import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene } from '../gap/engine.js';
-import { BomSnapshot, EvidenceItemInput, WaiverInput } from '../gap/types.js';
+import { BomSnapshot, EvidenceItemInput, WaiverInput } from '@sibeaver/core';
 
 // ============================================================
 // 操作处理器注册表（导出供 direct-mode 调用方使用）

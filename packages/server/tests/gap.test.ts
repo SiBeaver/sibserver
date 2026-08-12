@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createTestSql } from './helpers/test-db.js';
-import { OperationContext } from '../src/operations/context.js';
+import { createTestSql } from '../../core/tests/helpers/test-db.js';
+import { OperationContext } from '@sibeaver/core';
 import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene } from '../src/gap/engine.js';
-import type { BomSnapshot } from '../src/gap/types.js';
+import type { BomSnapshot } from '@sibeaver/core';
 
 const NOW = '2026-07-28T02:00:00.000Z';
 const LATER = '2026-07-28T03:00:00.000Z';

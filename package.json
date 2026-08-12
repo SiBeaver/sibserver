@@ -1,12 +1,12 @@
 {
-  "name": "si-beaver",
+  "name": "sibeaver",
   "version": "0.2.0",
   "private": true,
   "description": "AI-native cognitive engine — monorepo",
   "scripts": {
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
-    "test": "pnpm --filter @si-beaver/server test"
+    "test": "pnpm --filter @sibeaver/server test"
   },
   "license": "AGPL-3.0-only",
   "engines": {

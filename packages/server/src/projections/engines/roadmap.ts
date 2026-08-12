@@ -1,14 +1,14 @@
 // @sibom r-q4x8
-import type { OperationContext } from '../../operations/context.js';
+import type { OperationContext } from '@sibeaver/core';
 import type {
   GoalNode,
   ExplorationNode,
   RiskNode,
   TechDebtNode,
   CognitiveNode,
-} from '../../nodes/types.js';
-import { getRoadmap, currentBlockers } from '../../operations/queries.js';
-import type { RoadmapItem } from '../../operations/queries.js';
+} from '@sibeaver/core';
+import { getRoadmap, currentBlockers } from '@sibeaver/core';
+import type { RoadmapItem } from '@sibeaver/core';
 import type {
   ProjectionTemplate,
   GeneratedProjection,

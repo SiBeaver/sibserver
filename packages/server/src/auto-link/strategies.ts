@@ -1,5 +1,5 @@
-import type { NodeType } from '../nodes/types.js';
-import type { RelationType } from '../edges/types.js';
+import type { NodeType } from '@sibeaver/core';
+import type { RelationType } from '@sibeaver/core';
 
 export interface LinkStrategy {
   candidateTypes: NodeType[];

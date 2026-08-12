@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { OperationContext } from '../src/operations/context.js';
+import { OperationContext } from '@sibeaver/core';
 import { registerTools, slimEnvelope, slimSearchResult, slimBatchResult, slimProjectStateResult } from '../src/mcp/tools.js';
-import { createTestSql } from './helpers/test-db.js';
+import { createTestSql } from '../../core/tests/helpers/test-db.js';
 
 // MCP 响应瘦身：写操作只回执确认字段，搜索截断 description
 //（每次 MCP 调用都进 agent 上下文，全量回显是 token 浪费源）

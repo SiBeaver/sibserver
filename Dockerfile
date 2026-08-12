@@ -1,5 +1,5 @@
 # === build: install deps + compile all packages ===
-# Build context: srcs/si-beaver/
+# Build context: vibesrcs/sibeaver/
 FROM node:22-alpine AS build
 ARG http_proxy
 ARG https_proxy
@@ -8,6 +8,7 @@ WORKDIR /app
 
 # Layer 1: package manifests → pnpm install (cached by lockfile)
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json .npmrc* ./
+COPY packages/core/package.json packages/core/
 COPY packages/server/package.json packages/server/
 COPY packages/webui/package.json packages/webui/
 RUN pnpm install --frozen-lockfile

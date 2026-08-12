@@ -1,6 +1,6 @@
 import { generate } from '../projections/generate.js';
 import { listProjections } from '../projections/registry.js';
-import type { OperationContext } from './context.js';
+import type { OperationContext } from '@sibeaver/core';
 import type { ProjectionConfigEntry } from '../projections/types.js';
 
 export interface GenerateProjectionInput {

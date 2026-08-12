@@ -13,6 +13,4 @@ export {
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   getHelmSignals,
 } from './queries.js';
-export type { HelmSignal, HelmResponse, HelmSignalType } from './queries.js';
-export { generateProjection, listProjectionTypes } from './projections.js';
-export { distillConversation, type DistillConversationInput, type DistillConversationResponse, type DistillProposal } from './distill-conversation.js';
+export type { HelmSignal, HelmResponse, HelmSignalType, RoadmapItem } from './queries.js';

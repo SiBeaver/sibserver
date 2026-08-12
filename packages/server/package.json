@@ -1,12 +1,12 @@
 {
-  "name": "@si-beaver/server",
+  "name": "@sibeaver/server",
   "version": "0.2.0",
   "description": "AI-native cognitive engine — REST API, MCP, SIBS client",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "si-beaver": "dist/cli.js"
+    "sibeaver": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -34,6 +34,7 @@
   "dependencies": {
     "@hono/node-server": "^2.0.1",
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@sibeaver/core": "workspace:*",
     "hono": "^4.12.28",
     "openai": "^6.39.0",
     "postgres": "^3.4.9",

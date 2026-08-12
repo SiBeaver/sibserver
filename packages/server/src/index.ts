@@ -1,18 +1,10 @@
-// si-beaver server version
+// sibeaver server version
 export const VERSION = '0.2.0';
 
-// core types & lifecycle
-export * from './nodes/types.js';
-export * from './edges/types.js';
-export * from './events/types.js';
-export * from './events/interfaces.js';
-export * from './events/emitter.js';
-export * from './lifecycle/machines.js';
-export * from './context.js';
+// core — graph types, storage, events, lifecycle, node operations
+export * from '@sibeaver/core';
 
 // server internals
-export * from './storage/index.js';
-export * from './operations/index.js';
 export * from './projections/index.js';
 export * from './embedding/index.js';
 export { ProjectManager } from './projects/manager.js';
@@ -22,6 +14,10 @@ export { handleMcpRequest } from './mcp/http-server.js';
 export { startEmbedSync, getEmbedSyncStats } from './jobs/embed-sync.js';
 export { startLinkRepair, stopLinkRepair, getLinkRepairStats } from './jobs/link-repair.js';
 export { autoLink, LINK_STRATEGIES, type AutoLinkResult } from './auto-link/index.js';
+
+// operations extensions — distill & projections stay server-side (depend on llm-client)
+export { generateProjection, listProjectionTypes } from './operations/projections.js';
+export { distillConversation, type DistillConversationInput, type DistillConversationResponse, type DistillProposal } from './operations/distill-conversation.js';
 
 // config
 export { config } from './config/index.js';

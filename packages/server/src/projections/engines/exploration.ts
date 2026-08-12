@@ -1,6 +1,6 @@
 // @sibom r-m3v9
-import type { OperationContext } from '../../operations/context.js';
-import type { ExplorationNode } from '../../nodes/types.js';
+import type { OperationContext } from '@sibeaver/core';
+import type { ExplorationNode } from '@sibeaver/core';
 import type {
   ProjectionTemplate,
   GeneratedProjection,

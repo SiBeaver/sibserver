@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { ulid } from 'ulidx';
-import type { OperationContext } from '../operations/context.js';
-import type { RequirementNode, GoalNode } from '../nodes/types.js';
-import type { EvidenceInput, PatternResult } from '../constraints/types.js';
+import type { OperationContext } from '@sibeaver/core';
+import type { RequirementNode, GoalNode } from '@sibeaver/core';
+import type { EvidenceInput, PatternResult } from '@sibeaver/core';
 import { evaluateConstraint } from '../policies/constraint-evaluator.js';
 import type {
   BomSnapshot,
@@ -13,7 +13,7 @@ import type {
   GapRowRecord,
   GapView,
   WaiverRecord,
-} from './types.js';
+} from '@sibeaver/core';
 
 // ============================================================
 // Gap 引擎 — 三方对账：BOM@commit（应然）/ 证据（实然）/ 在办 goal（标注）

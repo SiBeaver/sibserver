@@ -1,4 +1,4 @@
-import type { EventType } from './events/types.js';
+import type { EventType } from '@sibeaver/core';
 import { config } from './config/index.js';
 import { sibs } from "./sibs-client.js";
 import type { ApiEvent } from './api-types.js';

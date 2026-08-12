@@ -5,8 +5,8 @@
 // 因此 API 消费者看到的是 camelCase，而非内部存储的 snake_case。
 // ============================================================
 
-import type { EventType } from './events/types.js';
-import type { RelationType } from './edges/types.js';
+import type { EventType } from '@sibeaver/core';
+import type { RelationType } from '@sibeaver/core';
 
 // ============================================================
 // 通用枚举（值相同，直接用 core 的）

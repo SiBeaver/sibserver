@@ -1,4 +1,4 @@
-import type { CognitiveNode } from '../nodes/types.js';
+import type { CognitiveNode } from '@sibeaver/core';
 
 /**
  * Extract embeddable text content from a node.

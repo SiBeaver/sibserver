@@ -1,8 +1,8 @@
 import { ulid } from 'ulidx';
-import type { OperationContext } from '../operations/context.js';
-import type { CognitiveNode, NodeType } from '../nodes/types.js';
-import type { Edge, RelationType } from '../edges/types.js';
-import { RELATION_CONSTRAINTS, validateRelation } from '../edges/types.js';
+import type { OperationContext } from '@sibeaver/core';
+import type { CognitiveNode, NodeType } from '@sibeaver/core';
+import type { Edge, RelationType } from '@sibeaver/core';
+import { RELATION_CONSTRAINTS, validateRelation } from '@sibeaver/core';
 import { jsonCompletion, type ChatMessage } from '../llm-client.js';
 import { LINK_STRATEGIES } from './strategies.js';
 import { config } from '../config/index.js';

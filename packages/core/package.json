@@ -1,0 +1,36 @@
+{
+  "name": "@sibeaver/core",
+  "version": "0.2.0",
+  "description": "sibeaver cognitive-engine core — graph types, storage, events, lifecycle, node operations",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "postgres": "^3.4.9",
+    "ulidx": "^2.4.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.17",
+    "better-sqlite3": "^12.9.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.3"
+  }
+}
