@@ -19,21 +19,16 @@ import {
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   getHelmSignals,
   batchOperations,
-  generateProjection, listProjectionTypes,
   distillConversation,
 } from '../index.js';
 import { ProjectManager } from '../projects/index.js';
-import { startEmbedSync, getEmbedSyncStats } from '../jobs/embed-sync.js';
-import { startLinkRepair, getLinkRepairStats } from '../jobs/link-repair.js';
 import { startPoller, onEvent, setDirectEventSource } from '../event-poller.js';
 import type { DirectEventSource } from '../event-poller.js';
 import { setDirectSibs } from '../sibs-client.js';
 import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
-import { generateEmbeddings, getEmbeddingConfig } from '../embedding/client.js';
 import { snakeToCamel, camelToSnake, kebabToSnake, toApiEvent } from './transforms.js';
 import { handleRequirementAccepted } from '../policies/triggers/requirement-trigger.js';
-import { handleKnowledgeRecorded } from '../policies/self-heal.js';
 import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
 import { evaluateConstraints, summarizeResults } from '../policies/constraint-evaluator.js';
 import type { Constraint, EvidenceInput } from '@sibeaver/core';
@@ -65,8 +60,6 @@ export const operationHandlers: Record<string, (ctx: OperationContext, input: an
   move_knowledge: moveKnowledge,
   link_nodes: linkNodes,
   delete_node: deleteNode,
-  generate_projection: generateProjection,
-  list_projections: listProjectionTypes,
 };
 
 // ============================================================
@@ -114,10 +107,6 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   }
 
   // === 监控路由 ===
-
-  app.get('/api/v1/stats/embedding', (c) => {
-    return c.json(getEmbedSyncStats());
-  });
 
   // === 项目管理路由 ===
 
@@ -210,23 +199,6 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const q = c.req.query('q');
     if (!q) return json(c, { error: '缺少查询参数 "q"' }, 400);
     return json(c, await getCtx(slug).nodes.search(q));
-  });
-
-  app.get('/:project/api/v1/search/semantic', async (c) => {
-    const slug = c.req.param('project');
-    const q = c.req.query('q');
-    if (!q) return json(c, { error: '缺少查询参数 "q"' }, 400);
-    if (!getEmbeddingConfig()) {
-      return json(c, { error: '语义搜索不可用：未配置 EMBEDDING_API_KEY' }, 503);
-    }
-    const topK = Math.min(Number(c.req.query('top_k')) || 10, 50);
-    try {
-      const [vec] = await generateEmbeddings([q]);
-      const results = await getCtx(slug).nodes.similaritySearch(vec, topK);
-      return json(c, results);
-    } catch (e: any) {
-      return json(c, { error: e.message }, 500);
-    }
   });
 
   app.get('/:project/api/v1/events', async (c) => {
@@ -382,39 +354,6 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/helm', async (c) => {
     const slug = c.req.param('project');
     return json(c, await getHelmSignals(getCtx(slug)));
-  });
-
-  app.get('/:project/api/v1/projections', async (c) => {
-    const slug = c.req.param('project');
-    const project = await manager.getProject(slug);
-    if (!project) return json(c, { error: '项目不存在' }, 404);
-    const types = await listProjectionTypes();
-    const configured = (project.metadata?.projections ?? {}) as Record<string, any>;
-    return json(c, {
-      available_types: types,
-      configured: Object.entries(configured).map(([key, cfg]: [string, any]) => ({
-        ...cfg,
-        id: key,
-      })),
-    });
-  });
-
-  app.post('/:project/api/v1/projections/:type/generate', async (c) => {
-    const slug = c.req.param('project');
-    const type = c.req.param('type');
-    const project = await manager.getProject(slug);
-    if (!project) return json(c, { error: '项目不存在' }, 404);
-    const projections = (project.metadata?.projections ?? {}) as Record<string, any>;
-    const config = projections[type];
-    if (!config) {
-      return json(c, { error: `No projection config for type "${type}"` }, 400);
-    }
-    try {
-      const result = await generateProjection(getCtx(slug), { type, config });
-      return json(c, result);
-    } catch (e: any) {
-      return json(c, { error: e.message }, 400);
-    }
   });
 
   app.get('/:project/api/v1/activity', async (c) => {
@@ -710,8 +649,6 @@ ${existingSummary || '（暂无）'}
     pollInterval: config.pollInterval,
   }));
 
-  app.get('/api/v1/stats/link-repair', (c) => c.json(getLinkRepairStats()));
-
   app.post('/api/v1/policies/from-requirement', async (c) => {
     const body = await c.req.json();
     const requirementId = body.requirementId;
@@ -865,12 +802,6 @@ async function start() {
   const { app, manager, handleMcpRequest } = createSiBeaverApp(authToken);
 
   await manager.init();
-  startEmbedSync(manager);
-  if (config.linkRepairEnabled) {
-    startLinkRepair(manager);
-  } else {
-    console.log('[link-repair] Disabled by LINK_REPAIR_ENABLED=false');
-  }
 
   const projectSlug = config.sibsProject || await manager.getDefaultProject();
   console.log(`[sibs] project=${projectSlug}`);
@@ -881,7 +812,6 @@ async function start() {
 
   // Cloud event handlers
   onEvent('requirement.status_changed', handleRequirementAccepted);
-  onEvent('knowledge.recorded', handleKnowledgeRecorded);
 
   const honoListener = getRequestListener(app.fetch);
   const MCP_PATH = /^\/([a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9])\/mcp$/;

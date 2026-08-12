@@ -5,18 +5,12 @@ export const VERSION = '0.2.0';
 export * from '@sibeaver/core';
 
 // server internals
-export * from './projections/index.js';
-export * from './embedding/index.js';
 export { ProjectManager } from './projects/manager.js';
 export type { ProjectMeta, CreateProjectInput, UpdateProjectInput } from './projects/types.js';
 export { createSiBeaverApp, operationHandlers, type SiBeaverApp } from './api/server.js';
 export { handleMcpRequest } from './mcp/http-server.js';
-export { startEmbedSync, getEmbedSyncStats } from './jobs/embed-sync.js';
-export { startLinkRepair, stopLinkRepair, getLinkRepairStats } from './jobs/link-repair.js';
-export { autoLink, LINK_STRATEGIES, type AutoLinkResult } from './auto-link/index.js';
 
-// operations extensions — distill & projections stay server-side (depend on llm-client)
-export { generateProjection, listProjectionTypes } from './operations/projections.js';
+// operations extensions — distill stays server-side (depends on llm-client)
 export { distillConversation, type DistillConversationInput, type DistillConversationResponse, type DistillProposal } from './operations/distill-conversation.js';
 
 // config

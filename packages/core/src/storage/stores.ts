@@ -147,64 +147,6 @@ export class NodeStore {
     `;
   }
 
-  // ---- Embedding methods ----
-
-  async getEmbedding(id: string): Promise<number[] | null> {
-    const rows = await this.sql`
-      SELECT embedding FROM nodes WHERE id = ${id} AND project_id = ${this.projectId}
-    `;
-    return rows[0]?.embedding ?? null;
-  }
-
-  async updateEmbedding(id: string, embedding: number[]): Promise<void> {
-    const vecStr = `[${embedding.join(',')}]`;
-    await this.sql`
-      UPDATE nodes SET embedding = ${vecStr}::vector
-      WHERE id = ${id} AND project_id = ${this.projectId}
-    `;
-  }
-
-  async clearEmbedding(id: string): Promise<void> {
-    await this.sql`
-      UPDATE nodes SET embedding = NULL
-      WHERE id = ${id} AND project_id = ${this.projectId}
-    `;
-  }
-
-  async getWithoutEmbedding(types: string[], limit: number = 32): Promise<CognitiveNode[]> {
-    const rows = await this.sql`
-      SELECT * FROM nodes
-      WHERE project_id = ${this.projectId}
-        AND type = ANY(${types})
-        AND embedding IS NULL
-      LIMIT ${limit}
-    `;
-    return rows.map(rowToNode);
-  }
-
-  async similaritySearch(embedding: number[], topK: number = 10, types?: string[]): Promise<Array<CognitiveNode & { distance: number }>> {
-    const vecStr = `[${embedding.join(',')}]`;
-    const rows = types && types.length > 0
-      ? await this.sql`
-          SELECT *, embedding <=> ${vecStr}::vector AS distance
-          FROM nodes
-          WHERE project_id = ${this.projectId}
-            AND embedding IS NOT NULL
-            AND type = ANY(${types})
-          ORDER BY embedding <=> ${vecStr}::vector
-          LIMIT ${topK}
-        `
-      : await this.sql`
-          SELECT *, embedding <=> ${vecStr}::vector AS distance
-          FROM nodes
-          WHERE project_id = ${this.projectId}
-            AND embedding IS NOT NULL
-          ORDER BY embedding <=> ${vecStr}::vector
-          LIMIT ${topK}
-        `;
-    return rows.map(r => ({ ...rowToNode(r), distance: parseFloat(r.distance) }));
-  }
-
   async getIsolatedNodes(maxEdges: number, limit: number = 10): Promise<CognitiveNode[]> {
     const rows = await this.sql`
       SELECT n.* FROM nodes n

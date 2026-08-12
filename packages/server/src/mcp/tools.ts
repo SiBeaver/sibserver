@@ -20,7 +20,6 @@ import {
   getRoadmap, goalProgress, decisionTrail, knowledgeMap,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   batchOperations,
-  generateProjection, listProjectionTypes,
   distillConversation,
   type OperationContext,
 } from '../index.js';
@@ -262,7 +261,7 @@ export interface ScopedToolsOptions {
   getContext: () => OperationContext;
   /** Expose project info tool showing current slug */
   slug: string;
-  /** Access project metadata for projections */
+  /** Access project metadata */
   getMetadata: () => Record<string, unknown>;
 }
 
@@ -309,8 +308,6 @@ const operationHandlers: Record<string, (ctx: OperationContext, input: any) => P
   record_knowledge: recordKnowledge,
   link_nodes: linkNodes,
   delete_node: deleteNode,
-  generate_projection: generateProjection,
-  list_projections: listProjectionTypes,
 };
 
 function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void {
@@ -697,32 +694,6 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     query: z.string().describe('搜索关键词'),
   }, log('full_text_search', async (args) => {
     return jsonResult(await fullTextSearch(getCtx(), args.query));
-  }));
-
-  // --- 投影 ---
-  server.tool('generate_projection', '从语义节点生成 Markdown 投影文档', {
-    type: z.string().describe('投影类型，如 "adr"'),
-  }, log('generate_projection', async (args) => {
-    const meta = getMetadata();
-    const projections = (meta?.projections ?? {}) as Record<string, any>;
-    const config = projections[args.type];
-    if (!config) {
-      throw new Error(`投影类型「${args.type}」未配置。请在项目元数据中配置。`);
-    }
-    return jsonResult(await generateProjection(getCtx(), { type: args.type, config }));
-  }));
-
-  server.tool('list_projections', '列出可用的投影类型及当前项目配置', {}, log('list_projections', async () => {
-    const types = await listProjectionTypes();
-    const meta = getMetadata();
-    const configured = (meta?.projections ?? {}) as Record<string, any>;
-    return jsonResult({
-      available_types: types,
-      configured: Object.entries(configured).map(([key, cfg]) => ({
-        ...cfg,
-        id: key,
-      })),
-    });
   }));
 }
 
@@ -1142,36 +1113,5 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
 
   server.tool('full_text_search', '全文搜索', { project: projectParam, query: z.string() }, log('full_text_search', async ({ project, query }) => {
     return jsonResult(await fullTextSearch(await ctx(project), query));
-  }));
-
-  // --- 投影 ---
-  server.tool('generate_projection', '从语义节点生成 Markdown 投影文档', {
-    project: projectParam,
-    type: z.string().describe('投影类型，如 "adr"'),
-  }, log('generate_projection', async ({ project, type }) => {
-    const slug = project ?? await manager.getDefaultProject();
-    const proj = await manager.getProject(slug);
-    const projections = (proj?.metadata?.projections ?? {}) as Record<string, any>;
-    const config = projections[type];
-    if (!config) {
-      throw new Error(`投影类型「${type}」未配置。请在项目元数据中配置。`);
-    }
-    return jsonResult(await generateProjection(await ctx(slug), { type, config }));
-  }));
-
-  server.tool('list_projections', '列出可用的投影类型及当前项目配置', {
-    project: projectParam,
-  }, log('list_projections', async ({ project }) => {
-    const slug = project ?? await manager.getDefaultProject();
-    const proj = await manager.getProject(slug);
-    const types = await listProjectionTypes();
-    const configured = (proj?.metadata?.projections ?? {}) as Record<string, any>;
-    return jsonResult({
-      available_types: types,
-      configured: Object.entries(configured).map(([key, cfg]) => ({
-        ...cfg,
-        id: key,
-      })),
-    });
   }));
 }
