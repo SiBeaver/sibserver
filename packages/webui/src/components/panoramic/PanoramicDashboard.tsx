@@ -54,6 +54,7 @@ export function PanoramicDashboard({ slug }: PanoramicDashboardProps) {
         <StatsRow
           statistics={state.statistics}
           taskCount={tasks.length}
+          decisionCount={state.recentDecisions?.length}
         />
       )}
 

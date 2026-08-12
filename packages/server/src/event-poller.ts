@@ -7,6 +7,7 @@ export type EventHandler = (event: ApiEvent) => Promise<void>;
 
 const handlers = new Map<EventType, EventHandler[]>();
 let lastSeen: string | null = null;
+let lastSeenId: string | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 
 // ============================================================
@@ -42,6 +43,9 @@ async function poll() {
     if (events.length === 0) return;
 
     for (const event of events) {
+      // getSince 用 timestamp >= since（含等号），最新事件每轮都会被带回；按 id 去重防重复副作用
+      if (event.id === lastSeenId) continue;
+      lastSeenId = event.id;
       lastSeen = event.timestamp;
       const eventHandlers = handlers.get(event.eventType) ?? [];
       for (const handler of eventHandlers) {

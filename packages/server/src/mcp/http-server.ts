@@ -93,6 +93,12 @@ export async function handleMcpRequest(
 
     if (sessionId && sessions.has(sessionId)) {
       entry = sessions.get(sessionId)!;
+      if (entry.slug !== slug) {
+        // session 属于其他项目，不能跨项目复用 —— 视为失效，客户端重新初始化
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Session not found', code: 'SESSION_EXPIRED' }));
+        return true;
+      }
       clearSessionTimer(entry);
     } else if (sessionId) {
       // Session expired or unknown — return 404 per MCP spec so client re-initializes

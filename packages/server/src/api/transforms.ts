@@ -1,7 +1,25 @@
+import type { EventRecord } from '@sibeaver/core';
+import type { ApiEvent, ApiFieldDiff } from '../api-types.js';
+
 /**
  * Key transformation utilities for API layer.
  * DB/operations use snake_case internally; REST API exposes camelCase.
  */
+
+export function toApiEvent(ev: EventRecord): ApiEvent {
+  return {
+    id: ev.id,
+    timestamp: ev.timestamp,
+    eventType: ev.event_type,
+    actor: ev.actor,
+    operation: ev.operation,
+    nodeId: ev.node_id,
+    nodeType: ev.node_type,
+    payload: ev.payload,
+    diff: ev.diff as ApiFieldDiff[] | null,
+    context: ev.context,
+  };
+}
 
 function snakeToCamelKey(key: string): string {
   return key.replace(/_([a-z0-9])/g, (_, ch) => ch.toUpperCase());

@@ -63,8 +63,14 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
     }
 
     const json = await res.json() as EmbeddingResponse;
-    for (const item of json.data) {
-      results[i + item.index] = item.embedding;
+    if (json.data.length !== batch.length) {
+      throw new Error(`嵌入 API 返回不完整：期望 ${batch.length} 条，实际 ${json.data.length} 条`);
+    }
+    const byIndex = new Map(json.data.map(d => [d.index, d.embedding]));
+    for (let j = 0; j < batch.length; j++) {
+      const vec = byIndex.get(j);
+      if (!vec) throw new Error(`嵌入 API 缺少第 ${j} 条结果`);
+      results[i + j] = vec;
     }
   }
 

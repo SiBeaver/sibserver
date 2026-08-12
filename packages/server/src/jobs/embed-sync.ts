@@ -5,6 +5,7 @@ const INTERVAL_MS = 30_000; // 30 seconds
 const BATCH_SIZE = 32;
 
 let timer: ReturnType<typeof setInterval> | null = null;
+let running = false;
 
 // Cumulative stats for monitoring
 const stats = {
@@ -72,6 +73,18 @@ async function syncOnce(manager: ProjectManager): Promise<void> {
   }
 }
 
+async function runSync(manager: ProjectManager): Promise<void> {
+  if (running) return; // 上一轮未结束则跳过本轮，防重叠加跑重复付费
+  running = true;
+  try {
+    await syncOnce(manager);
+  } catch (err) {
+    console.error('[embed-sync] Sync error:', err);
+  } finally {
+    running = false;
+  }
+}
+
 export function startEmbedSync(manager: ProjectManager): void {
   if (!getEmbeddingConfig()) {
     console.log('[embed-sync] EMBEDDING_API_KEY not set, skipping embedding sync');
@@ -81,10 +94,10 @@ export function startEmbedSync(manager: ProjectManager): void {
   console.log('[embed-sync] Started (interval: 30s)');
 
   // Run once immediately
-  syncOnce(manager).catch(err => console.error('[embed-sync] Initial sync error:', err));
+  runSync(manager);
 
   timer = setInterval(() => {
-    syncOnce(manager).catch(err => console.error('[embed-sync] Sync error:', err));
+    runSync(manager);
   }, INTERVAL_MS);
 }
 

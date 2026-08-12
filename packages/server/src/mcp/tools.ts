@@ -215,7 +215,10 @@ export function slimProjectStateResult(result: any): any {
         out[k] = v;
       }
     }
-    delete out.requirements;
+    // cockpit 等响应只有 requirements 没有 open_requirements，不能删
+    if ('open_requirements' in out) {
+      delete out.requirements;
+    }
     content.text = JSON.stringify(snakeToCamel(out), null, 2);
   } catch {
     // 非 JSON 文本——保持原样

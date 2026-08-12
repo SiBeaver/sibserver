@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Typography, Row, Col, Button, Empty, Spin, theme, Space, Modal } from 'antd';
+import { Card, Typography, Row, Col, Button, Empty, Spin, theme, Space, Modal, App } from 'antd';
 import { PlusOutlined, FolderOutlined, LogoutOutlined, DeleteOutlined } from '@ant-design/icons';
 import useSWR from 'swr';
 import { fetchProjects, deleteProject } from '../api/client';
@@ -13,6 +13,7 @@ export function ProjectsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const navigate = useNavigate();
   const { token } = theme.useToken();
+  const { message } = App.useApp();
 
   const handleLogout = () => {
     clearToken();
@@ -28,8 +29,13 @@ export function ProjectsPage() {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
-        await deleteProject(project.slug);
-        mutate();
+        try {
+          await deleteProject(project.slug);
+          message.success(`已删除「${project.name}」`);
+          mutate();
+        } catch (err: any) {
+          message.error(err?.message ?? '删除项目失败');
+        }
       },
     });
   };

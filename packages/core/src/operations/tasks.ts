@@ -24,52 +24,57 @@ export interface CreateTaskResult {
 }
 
 export async function createTask(ctx: OperationContext, input: CreateTaskInput): Promise<CreateTaskResult> {
-  const now = new Date().toISOString();
-  const task: TaskNode = {
-    id: ulid(),
-    type: 'task',
-    title: input.title,
-    description: input.description ?? '',
-    status: 'open',
-    tags: input.tags ?? [],
-    created_at: now,
-    updated_at: now,
-    metadata: {},
-    priority: input.priority ?? 'medium',
-  };
-
-  await ctx.nodes.insert(task);
-
-  const edges_created: Edge[] = [];
-
-  if (input.parent_goal) {
-    const parent = await ctx.nodes.getById(input.parent_goal);
-    if (!parent || parent.type !== 'goal') {
-      throw new Error(`父目标不存在：${input.parent_goal}`);
+  return ctx.withTx(async (tx) => {
+    if (input.parent_goal) {
+      const parent = await tx.nodes.getById(input.parent_goal);
+      if (!parent || parent.type !== 'goal') {
+        throw new Error(`父目标不存在：${input.parent_goal}`);
+      }
     }
-    const edge: Edge = {
+
+    const now = new Date().toISOString();
+    const task: TaskNode = {
       id: ulid(),
-      source_id: input.parent_goal,
-      target_id: task.id,
-      relation: 'decomposes_into',
-      weight: null,
-      annotation: null,
+      type: 'task',
+      title: input.title,
+      description: input.description ?? '',
+      status: 'open',
+      tags: input.tags ?? [],
       created_at: now,
+      updated_at: now,
+      metadata: {},
+      priority: input.priority ?? 'medium',
     };
-    await ctx.edges.insert(edge);
-    edges_created.push(edge);
-  }
 
-  const event = await ctx.events.emit({
-    event_type: 'task.created',
-    operation: 'create_task',
-    node_id: task.id,
-    node_type: 'task',
-    payload: { ...input },
-    context: null,
+    await tx.nodes.insert(task);
+
+    const edges_created: Edge[] = [];
+
+    if (input.parent_goal) {
+      const edge: Edge = {
+        id: ulid(),
+        source_id: input.parent_goal,
+        target_id: task.id,
+        relation: 'decomposes_into',
+        weight: null,
+        annotation: null,
+        created_at: now,
+      };
+      await tx.edges.insert(edge);
+      edges_created.push(edge);
+    }
+
+    const event = await tx.events.emit({
+      event_type: 'task.created',
+      operation: 'create_task',
+      node_id: task.id,
+      node_type: 'task',
+      payload: { ...input },
+      context: null,
+    });
+
+    return { task, edges_created, event };
   });
-
-  return { task, edges_created, event };
 }
 
 // ============================================================
@@ -83,32 +88,34 @@ export interface UpdateTaskStatusInput {
 }
 
 export async function updateTaskStatus(ctx: OperationContext, input: UpdateTaskStatusInput) {
-  const task = await ctx.nodes.getById(input.task_id);
-  if (!task || task.type !== 'task') {
-    throw new Error(`任务不存在：${input.task_id}`);
-  }
+  return ctx.withTx(async (tx) => {
+    const task = await tx.nodes.getById(input.task_id);
+    if (!task || task.type !== 'task') {
+      throw new Error(`任务不存在：${input.task_id}`);
+    }
 
-  const oldStatus = task.status;
-  if (!isValidTransition(TASK_TRANSITIONS, oldStatus as any, input.new_status)) {
-    throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
-  }
+    const oldStatus = task.status;
+    if (!isValidTransition(TASK_TRANSITIONS, oldStatus as any, input.new_status)) {
+      throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
+    }
 
-  const updated: TaskNode = {
-    ...task as TaskNode,
-    status: input.new_status,
-    updated_at: new Date().toISOString(),
-  };
-  await ctx.nodes.update(updated);
+    const updated: TaskNode = {
+      ...task as TaskNode,
+      status: input.new_status,
+      updated_at: new Date().toISOString(),
+    };
+    await tx.nodes.update(updated);
 
-  const event = await ctx.events.emit({
-    event_type: 'task.status_changed',
-    operation: 'update_task_status',
-    node_id: input.task_id,
-    node_type: 'task',
-    payload: { reason: input.reason ?? '' },
-    diff: [{ field: 'status', old_value: oldStatus, new_value: input.new_status }],
-    context: input.reason ?? null,
+    const event = await tx.events.emit({
+      event_type: 'task.status_changed',
+      operation: 'update_task_status',
+      node_id: input.task_id,
+      node_type: 'task',
+      payload: { reason: input.reason ?? '' },
+      diff: [{ field: 'status', old_value: oldStatus, new_value: input.new_status }],
+      context: input.reason ?? null,
+    });
+
+    return { task: updated, event };
   });
-
-  return { task: updated, event };
 }

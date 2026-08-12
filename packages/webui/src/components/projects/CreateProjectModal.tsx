@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, Form, Input } from 'antd';
+import { Modal, Form, Input, App } from 'antd';
 import { createProject } from '../../api/client';
 
 interface Props {
@@ -11,16 +11,22 @@ interface Props {
 export function CreateProjectModal({ open, onClose, onCreated }: Props) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const { message } = App.useApp();
 
   const handleOk = async () => {
+    let values;
     try {
-      const values = await form.validateFields();
-      setLoading(true);
+      values = await form.validateFields();
+    } catch {
+      return; // 校验失败，表单已就地显示错误
+    }
+    setLoading(true);
+    try {
       await createProject(values);
       form.resetFields();
       onCreated();
-    } catch {
-      // validation error
+    } catch (err: any) {
+      message.error(err?.message ?? '创建项目失败');
     } finally {
       setLoading(false);
     }

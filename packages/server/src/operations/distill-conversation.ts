@@ -58,7 +58,7 @@ function buildConversationText(input: DistillConversationInput): string {
 }
 
 // 防御上限：蒸馏只看最近的上下文，超长输入成本高收益低
-const MAX_INPUT_CHARS = 20_000;
+export const MAX_INPUT_CHARS = 20_000;
 
 export async function distillConversation(
   ctx: OperationContext,

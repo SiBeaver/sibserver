@@ -24,7 +24,7 @@ export function ProjectDetailPage() {
   const [chatOpen, setChatOpen] = useState(false);
   const { token } = theme.useToken();
 
-  const activeTab = (tab as Tab) || 'panoramic';
+  const activeTab = TAB_OPTIONS.some(t => t.value === tab) ? (tab as Tab) : 'panoramic';
 
   const { data: helmData } = useSWR(
     `${slug}/helm-count`,

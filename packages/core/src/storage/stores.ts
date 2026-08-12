@@ -149,6 +149,13 @@ export class NodeStore {
 
   // ---- Embedding methods ----
 
+  async getEmbedding(id: string): Promise<number[] | null> {
+    const rows = await this.sql`
+      SELECT embedding FROM nodes WHERE id = ${id} AND project_id = ${this.projectId}
+    `;
+    return rows[0]?.embedding ?? null;
+  }
+
   async updateEmbedding(id: string, embedding: number[]): Promise<void> {
     const vecStr = `[${embedding.join(',')}]`;
     await this.sql`

@@ -162,27 +162,32 @@ CREATE TABLE IF NOT EXISTS gap_waivers (
 );
 `;
 
-let _sql: postgres.Sql | null = null;
+let _poolPromise: Promise<postgres.Sql> | null = null;
 
 export function getConnectionString(): string {
   return process.env.DATABASE_URL
     ?? 'postgres://sibeaver:sibeaver@10.1.1.40:5432/sibeaver';
 }
 
-export async function getPool(): Promise<postgres.Sql> {
-  if (_sql) return _sql;
-  _sql = postgres(getConnectionString(), {
-    max: 20,
-    idle_timeout: 30,
-  });
-  await _sql.unsafe(SCHEMA_SQL);
-  return _sql;
+export function getPool(): Promise<postgres.Sql> {
+  if (!_poolPromise) {
+    _poolPromise = (async () => {
+      const sql = postgres(getConnectionString(), {
+        max: 20,
+        idle_timeout: 30,
+      });
+      await sql.unsafe(SCHEMA_SQL);
+      return sql;
+    })();
+  }
+  return _poolPromise;
 }
 
 export async function closePool(): Promise<void> {
-  if (_sql) {
-    await _sql.end();
-    _sql = null;
+  if (_poolPromise) {
+    const sql = await _poolPromise;
+    await sql.end();
+    _poolPromise = null;
   }
 }
 

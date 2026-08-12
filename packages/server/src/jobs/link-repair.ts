@@ -7,6 +7,7 @@ const BATCH_PER_PROJECT = 10;
 const MIN_EDGE_THRESHOLD = 1;
 
 let timer: ReturnType<typeof setInterval> | null = null;
+let running = false;
 
 const stats = {
   totalRepaired: 0,
@@ -60,6 +61,18 @@ async function repairOnce(manager: ProjectManager): Promise<void> {
   }
 }
 
+async function runRepair(manager: ProjectManager): Promise<void> {
+  if (running) return; // 上一轮未结束则跳过本轮，防重叠加跑重复 LLM 调用
+  running = true;
+  try {
+    await repairOnce(manager);
+  } catch (err) {
+    console.error('[link-repair] Run error:', err);
+  } finally {
+    running = false;
+  }
+}
+
 export function startLinkRepair(manager: ProjectManager): void {
   if (!config.llmApiKey) {
     console.log('[link-repair] LLM_API_KEY not set, skipping link repair');
@@ -69,11 +82,11 @@ export function startLinkRepair(manager: ProjectManager): void {
   console.log('[link-repair] Started (interval: 15m)');
 
   setTimeout(() => {
-    repairOnce(manager).catch(err => console.error('[link-repair] Initial run error:', err));
+    runRepair(manager);
   }, 60_000);
 
   timer = setInterval(() => {
-    repairOnce(manager).catch(err => console.error('[link-repair] Run error:', err));
+    runRepair(manager);
   }, INTERVAL_MS);
 }
 

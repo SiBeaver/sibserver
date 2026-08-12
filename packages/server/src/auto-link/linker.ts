@@ -105,13 +105,21 @@ async function findCandidates(
   const all = new Map<string, CognitiveNode>();
 
   if (useSimilarity) {
-    const results = await ctx.nodes.similaritySearch(
-      [], // will be handled by caller if embedding exists
-      strategy.maxCandidates,
-      strategy.candidateTypes,
-    ).catch(() => []);
-    for (const r of results) {
-      if (!excludeIds.has(r.id)) all.set(r.id, r);
+    const embedding = await ctx.nodes.getEmbedding(node.id);
+    if (!embedding) {
+      console.warn(`[auto-link] Node ${node.id} has no embedding, skipping similarity candidates`);
+    } else {
+      const results = await ctx.nodes.similaritySearch(
+        embedding,
+        strategy.maxCandidates,
+        strategy.candidateTypes,
+      ).catch(err => {
+        console.error(`[auto-link] Similarity search failed for node ${node.id}:`, err);
+        return [];
+      });
+      for (const r of results) {
+        if (!excludeIds.has(r.id)) all.set(r.id, r);
+      }
     }
   }
 

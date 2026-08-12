@@ -1,9 +1,11 @@
 import { createServer } from 'node:http';
+import { timingSafeEqual, createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { getRequestListener } from '@hono/node-server';
 import { handleMcpRequest } from '../mcp/http-server.js';
 import { chatCompletion, jsonCompletion, type ChatMessage } from '../llm-client.js';
+import { MAX_INPUT_CHARS } from '../operations/distill-conversation.js';
 import type { OperationContext, BatchOperationsInput } from '../index.js';
 import {
   defineGoal, decomposeGoal, updateGoalStatus,
@@ -29,7 +31,7 @@ import { setDirectSibs } from '../sibs-client.js';
 import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
 import { generateEmbeddings, getEmbeddingConfig } from '../embedding/client.js';
-import { snakeToCamel, camelToSnake, kebabToSnake } from './transforms.js';
+import { snakeToCamel, camelToSnake, kebabToSnake, toApiEvent } from './transforms.js';
 import { handleRequirementAccepted } from '../policies/triggers/requirement-trigger.js';
 import { handleKnowledgeRecorded } from '../policies/self-heal.js';
 import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
@@ -81,8 +83,12 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
 
   if (authToken) {
     const authMw = async (c: any, next: any) => {
-      const auth = c.req.header('Authorization');
-      if (auth !== `Bearer ${authToken}`) {
+      const provided = c.req.header('Authorization') ?? '';
+      const ok = timingSafeEqual(
+        createHash('sha256').update(provided).digest(),
+        createHash('sha256').update(`Bearer ${authToken}`).digest(),
+      );
+      if (!ok) {
         return c.json({ error: '未授权' }, 401);
       }
       await next();
@@ -186,7 +192,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const slug = c.req.param('project');
     const nodeId = c.req.param('id');
     const events = await getCtx(slug).eventStore.getByNode(nodeId);
-    return json(c, events);
+    return json(c, events.map(toApiEvent));
   });
 
   app.get('/:project/api/v1/nodes/:id/trail', async (c) => {
@@ -228,8 +234,13 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const since = c.req.query('since');
     const limit = c.req.query('limit');
     const ctx = getCtx(slug);
-    if (since) return json(c, await ctx.eventStore.getSince(since));
-    return json(c, await ctx.eventStore.getRecent(Number(limit) || 20));
+    const clamped = Math.min(Math.max(Number(limit) || 20, 1), 200);
+    if (since) {
+      const events = await ctx.eventStore.getSince(since);
+      return json(c, { events: events.map(toApiEvent) });
+    }
+    const events = await ctx.eventStore.getRecent(clamped);
+    return json(c, { events: events.map(toApiEvent) });
   });
 
   app.get('/:project/api/v1/roadmap', async (c) => {
@@ -409,7 +420,8 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/activity', async (c) => {
     const slug = c.req.param('project');
     const limit = c.req.query('limit');
-    return json(c, await recentActivity(getCtx(slug), limit ? Number(limit) : undefined));
+    const clamped = limit ? Math.min(Math.max(Number(limit), 1), 200) : undefined;
+    return json(c, await recentActivity(getCtx(slug), clamped));
   });
 
   app.get('/:project/api/v1/fts', async (c) => {
@@ -730,6 +742,10 @@ ${existingSummary || '（暂无）'}
     const { requirementId, message } = body;
     if (!requirementId) return c.json({ error: '缺少 requirementId' }, 400);
     if (!message) return c.json({ error: '缺少 message' }, 400);
+    if (typeof message !== 'string' || typeof requirementId !== 'string') {
+      return c.json({ error: '参数类型错误' }, 400);
+    }
+    const cappedMessage = message.length > MAX_INPUT_CHARS ? message.slice(0, MAX_INPUT_CHARS) : message;
 
     const { sibs } = await import('../sibs-client.js');
     const { chatCompletion } = await import('../llm-client.js');
@@ -761,7 +777,7 @@ ${state.requirements.filter((r: any) => r.id !== requirementId).map((r: any) => 
 
 请用中文回答，给出具体可操作的建议。`,
       },
-      { role: 'user', content: message },
+      { role: 'user', content: cappedMessage },
     ];
 
     const response = await chatCompletion(messages as any);
@@ -947,10 +963,10 @@ function buildDirectSibs(manager: ProjectManager, slug: string): DirectSibsConte
       const ctx = getCtx();
       if (since) {
         const events = await ctx.eventStore.getSince(since);
-        return { events: events as any[] };
+        return { events: events.map(toApiEvent) };
       }
       const events = await ctx.eventStore.getRecent(limit);
-      return { events: events as any[] };
+      return { events: events.map(toApiEvent) };
     },
 
     defineGoal: (input: any) =>
@@ -976,10 +992,10 @@ function buildDirectEventSource(manager: ProjectManager, slug: string): DirectEv
       const ctx = manager.getContext(slug);
       if (since) {
         const events = await ctx.eventStore.getSince(since);
-        return { events: events as any[] };
+        return { events: events.map(toApiEvent) };
       }
       const events = await ctx.eventStore.getRecent(limit);
-      return { events: events as any[] };
+      return { events: events.map(toApiEvent) };
     },
   };
 }

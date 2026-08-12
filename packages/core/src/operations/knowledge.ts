@@ -2,6 +2,8 @@ import { ulid } from 'ulidx';
 import type { OperationContext } from './context.js';
 import type { Edge } from '../edges/types.js';
 import type { KnowledgeNode } from '../nodes/types.js';
+import { validateRelation } from '../edges/types.js';
+import type { NodeType } from '../nodes/types.js';
 
 // ============================================================
 // record_knowledge — 记录知识
@@ -23,66 +25,72 @@ export interface RecordKnowledgeInput {
 }
 
 export async function recordKnowledge(ctx: OperationContext, input: RecordKnowledgeInput) {
-  const now = new Date().toISOString();
-  const knowledge: KnowledgeNode = {
-    id: ulid(),
-    type: 'knowledge',
-    title: input.title,
-    description: input.description,
-    status: 'established',
-    tags: input.tags ?? [],
-    created_at: now,
-    updated_at: now,
-    metadata: {},
-    domain: input.domain,
-    confidence: input.confidence ?? 'medium',
-    source: input.source,
-    scope: input.scope ?? 'project',
-    valid_until: null,
-    content: input.content ?? '',
-    parent_id: input.parent_id ?? null,
-    pinned: input.pinned ?? false,
-    sort_order: 0,
-  };
-
-  await ctx.nodes.insert(knowledge);
-  const edges_created: Edge[] = [];
-  const invalidated_nodes: KnowledgeNode[] = [];
-
-  for (const fromId of input.derived_from ?? []) {
-    const edge: Edge = {
-      id: ulid(), source_id: fromId, target_id: knowledge.id,
-      relation: 'produces', weight: null, annotation: null, created_at: now,
+  return ctx.withTx(async (tx) => {
+    const now = new Date().toISOString();
+    const knowledge: KnowledgeNode = {
+      id: ulid(),
+      type: 'knowledge',
+      title: input.title,
+      description: input.description,
+      status: 'established',
+      tags: input.tags ?? [],
+      created_at: now,
+      updated_at: now,
+      metadata: {},
+      domain: input.domain,
+      confidence: input.confidence ?? 'medium',
+      source: input.source,
+      scope: input.scope ?? 'project',
+      valid_until: null,
+      content: input.content ?? '',
+      parent_id: input.parent_id ?? null,
+      pinned: input.pinned ?? false,
+      sort_order: 0,
     };
-    await ctx.edges.insert(edge);
-    edges_created.push(edge);
-  }
 
-  for (const oldId of input.invalidates ?? []) {
-    const oldNode = await ctx.nodes.getById(oldId);
-    if (oldNode && oldNode.type === 'knowledge') {
-      const updated = { ...oldNode as KnowledgeNode, status: 'outdated' as const, updated_at: now };
-      await ctx.nodes.update(updated);
-      invalidated_nodes.push(updated);
+    await tx.nodes.insert(knowledge);
+    const edges_created: Edge[] = [];
+    const invalidated_nodes: KnowledgeNode[] = [];
 
+    for (const fromId of input.derived_from ?? []) {
+      const from = await tx.nodes.getById(fromId);
+      if (!from || !validateRelation('produces', from.type as NodeType, 'knowledge')) {
+        throw new Error(`来源节点不存在或类型不符：${fromId}`);
+      }
       const edge: Edge = {
-        id: ulid(), source_id: knowledge.id, target_id: oldId,
-        relation: 'supersedes', weight: null, annotation: null, created_at: now,
+        id: ulid(), source_id: fromId, target_id: knowledge.id,
+        relation: 'produces', weight: null, annotation: null, created_at: now,
       };
-      await ctx.edges.insert(edge);
+      await tx.edges.insert(edge);
       edges_created.push(edge);
     }
-  }
 
-  const event = await ctx.events.emit({
-    event_type: 'knowledge.recorded',
-    operation: 'record_knowledge',
-    node_id: knowledge.id,
-    node_type: 'knowledge',
-    payload: { title: input.title, domain: input.domain, confidence: knowledge.confidence },
+    for (const oldId of input.invalidates ?? []) {
+      const oldNode = await tx.nodes.getById(oldId);
+      if (oldNode && oldNode.type === 'knowledge') {
+        const updated = { ...oldNode as KnowledgeNode, status: 'outdated' as const, updated_at: now };
+        await tx.nodes.update(updated);
+        invalidated_nodes.push(updated);
+
+        const edge: Edge = {
+          id: ulid(), source_id: knowledge.id, target_id: oldId,
+          relation: 'supersedes', weight: null, annotation: null, created_at: now,
+        };
+        await tx.edges.insert(edge);
+        edges_created.push(edge);
+      }
+    }
+
+    const event = await tx.events.emit({
+      event_type: 'knowledge.recorded',
+      operation: 'record_knowledge',
+      node_id: knowledge.id,
+      node_type: 'knowledge',
+      payload: { title: input.title, domain: input.domain, confidence: knowledge.confidence },
+    });
+
+    return { knowledge, invalidated_nodes, edges_created, event };
   });
-
-  return { knowledge, invalidated_nodes, edges_created, event };
 }
 
 // ============================================================
@@ -103,37 +111,39 @@ export interface UpdateKnowledgeInput {
 }
 
 export async function updateKnowledge(ctx: OperationContext, input: UpdateKnowledgeInput) {
-  const node = await ctx.nodes.getById(input.knowledge_id);
-  if (!node || node.type !== 'knowledge') {
-    throw new Error(`知识节点不存在：${input.knowledge_id}`);
-  }
+  return ctx.withTx(async (tx) => {
+    const node = await tx.nodes.getById(input.knowledge_id);
+    if (!node || node.type !== 'knowledge') {
+      throw new Error(`知识节点不存在：${input.knowledge_id}`);
+    }
 
-  const now = new Date().toISOString();
-  const updated: KnowledgeNode = {
-    ...(node as KnowledgeNode),
-    title: input.title ?? node.title,
-    description: input.description ?? node.description,
-    content: input.content ?? (node as any).content ?? '',
-    domain: input.domain ?? (node as KnowledgeNode).domain,
-    confidence: input.confidence ?? (node as KnowledgeNode).confidence,
-    scope: input.scope ?? (node as KnowledgeNode).scope ?? 'project',
-    status: input.status ?? node.status as any,
-    tags: input.tags ?? node.tags,
-    parent_id: input.parent_id !== undefined ? input.parent_id : (node as any).parent_id ?? null,
-    updated_at: now,
-  };
+    const now = new Date().toISOString();
+    const updated: KnowledgeNode = {
+      ...(node as KnowledgeNode),
+      title: input.title ?? node.title,
+      description: input.description ?? node.description,
+      content: input.content ?? (node as any).content ?? '',
+      domain: input.domain ?? (node as KnowledgeNode).domain,
+      confidence: input.confidence ?? (node as KnowledgeNode).confidence,
+      scope: input.scope ?? (node as KnowledgeNode).scope ?? 'project',
+      status: input.status ?? node.status as any,
+      tags: input.tags ?? node.tags,
+      parent_id: input.parent_id !== undefined ? input.parent_id : (node as any).parent_id ?? null,
+      updated_at: now,
+    };
 
-  await ctx.nodes.update(updated);
+    await tx.nodes.update(updated);
 
-  const event = await ctx.events.emit({
-    event_type: 'knowledge.recorded',
-    operation: 'update_knowledge',
-    node_id: updated.id,
-    node_type: 'knowledge',
-    payload: { title: updated.title, domain: updated.domain },
+    const event = await tx.events.emit({
+      event_type: 'knowledge.recorded',
+      operation: 'update_knowledge',
+      node_id: updated.id,
+      node_type: 'knowledge',
+      payload: { title: updated.title, domain: updated.domain },
+    });
+
+    return { knowledge: updated, event };
   });
-
-  return { knowledge: updated, event };
 }
 
 // ============================================================
