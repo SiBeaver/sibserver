@@ -10,16 +10,11 @@ interface ActivityTimelineProps {
 }
 
 const OP_LABELS: Record<string, string> = {
-  define_goal: '定义目标',
-  decompose_goal: '分解目标',
-  update_goal_status: '更新目标',
-  create_task: '创建任务',
-  update_task_status: '更新任务',
+  define_witem: '定义工作项',
+  decompose_witem: '分解工作项',
+  update_witem_status: '更新工作项',
   record_decision: '记录决策',
   record_knowledge: '记录知识',
-  begin_exploration: '开始探索',
-  conclude_exploration: '结论探索',
-  record_exploration_finding: '探索发现',
   identify_risk: '识别风险',
   update_risk: '更新风险',
   define_requirement: '定义需求',

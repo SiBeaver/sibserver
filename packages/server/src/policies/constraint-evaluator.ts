@@ -11,13 +11,11 @@ import type {
 } from '@sibeaver/core';
 
 const NODE_TYPE_MAP: Record<string, string> = {
-  goals: 'goal',
-  tasks: 'task',
+  witems: 'witem',
   decisions: 'decision',
   knowledge: 'knowledge',
   requirements: 'requirement',
   risks: 'risk',
-  explorations: 'exploration',
   tech_debts: 'tech_debt',
 };
 

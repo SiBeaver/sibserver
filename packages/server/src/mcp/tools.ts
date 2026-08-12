@@ -9,18 +9,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
-  defineGoal, decomposeGoal, updateGoalStatus,
-  createTask, updateTaskStatus,
-  beginExploration, recordExplorationFinding, concludeExploration, abandonExploration,
-  recordDecision,
+  defineWitem, decomposeWitem, updateWitemStatus,
+  recordDecision, updateDecisionStatus,
   defineRequirement, updateRequirementStatus, updateRequirementAcceptance,
   identifyRisk, updateRisk, registerTechDebt,
   recordKnowledge,
   linkNodes, deleteNode, getProjectState, getNodeContext,
-  getRoadmap, goalProgress, decisionTrail, knowledgeMap,
+  getRoadmap, witemProgress, decisionTrail, knowledgeMap,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   batchOperations,
-  distillConversation,
   type OperationContext,
 } from '../index.js';
 import type { ProjectManager } from '../projects/index.js';
@@ -154,10 +151,8 @@ function slimSearchToolResult(result: any): any {
 }
 
 const SLIM_WRITE_TOOLS = new Set([
-  'define_goal', 'decompose_goal', 'update_goal_status',
-  'create_task', 'update_task_status',
-  'begin_exploration', 'record_exploration_finding', 'conclude_exploration', 'abandon_exploration',
-  'record_decision',
+  'define_witem', 'decompose_witem', 'update_witem_status',
+  'record_decision', 'update_decision_status',
   'define_requirement', 'update_requirement_status', 'update_requirement_acceptance',
   'identify_risk', 'update_risk', 'register_tech_debt',
   'record_knowledge',
@@ -187,15 +182,11 @@ function slimStateNode(node: Record<string, unknown>): Record<string, unknown> {
     ['createdAt', ['createdAt', 'created_at']],
     ['updatedAt', ['updatedAt', 'updated_at']],
   ]);
-  for (const key of ['description', 'hypothesis', 'approach'] as const) {
+  for (const key of ['description'] as const) {
     const value = node[key];
     if (typeof value === 'string') {
       out[key] = value.length > 200 ? `${value.slice(0, 200)}…` : value;
     }
-  }
-  if (Array.isArray(node.findings) && node.findings.length > 0) {
-    out.findings = node.findings.slice(0, 3).map(f =>
-      typeof f === 'string' && f.length > 200 ? `${f.slice(0, 200)}…` : f);
   }
   return out;
 }
@@ -290,16 +281,11 @@ export function registerTools(server: McpServer, opts: RegisterToolsOptions): vo
 
 /** Shared operation handler map for batch_operations */
 const operationHandlers: Record<string, (ctx: OperationContext, input: any) => Promise<any>> = {
-  define_goal: defineGoal,
-  decompose_goal: decomposeGoal,
-  update_goal_status: updateGoalStatus,
-  create_task: createTask,
-  update_task_status: updateTaskStatus,
-  begin_exploration: beginExploration,
-  record_exploration_finding: recordExplorationFinding,
-  conclude_exploration: concludeExploration,
-  abandon_exploration: abandonExploration,
+  define_witem: defineWitem,
+  decompose_witem: decomposeWitem,
+  update_witem_status: updateWitemStatus,
   record_decision: recordDecision,
+  update_decision_status: updateDecisionStatus,
   define_requirement: defineRequirement,
   update_requirement_status: updateRequirementStatus,
   identify_risk: identifyRisk,
@@ -322,104 +308,36 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
   }));
 
   // --- 目标 ---
-  server.tool('define_goal', '定义一个项目目标', {
+  server.tool('define_witem', '定义一个项目目标', {
     title: z.string().describe('目标标题'),
     description: z.string().optional().describe('详细描述'),
     horizon: z.enum(['short', 'medium', 'long']).describe('时间范围'),
     success_criteria: z.array(z.string()).optional().describe('成功标准'),
     priority: z.enum(['critical', 'high', 'medium', 'low']).describe('优先级'),
-    parent_goal: z.string().optional().describe('父目标 ID'),
+    parent_witem: z.string().optional().describe('父目标 ID'),
     tags: z.array(z.string()).optional().describe('标签'),
-  }, log('define_goal', async (args) => {
-    return jsonResult(await defineGoal(getCtx(), args));
+  }, log('define_witem', async (args) => {
+    return jsonResult(await defineWitem(getCtx(), args));
   }));
 
-  server.tool('decompose_goal', '将目标分解为子目标和需要的探索', {
-    goal_id: z.string().describe('要分解的目标 ID'),
+  server.tool('decompose_witem', '将目标分解为子目标', {
+    witem_id: z.string().describe('要分解的目标 ID'),
     sub_goals: z.array(z.object({
       title: z.string(), description: z.string().optional(),
       horizon: z.enum(['short', 'medium', 'long']),
       success_criteria: z.array(z.string()).optional(),
       priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
     })).optional().describe('子目标列表'),
-    explorations_needed: z.array(z.object({
-      topic: z.string(), reason: z.string(), hypothesis: z.string().optional(),
-    })).optional().describe('需要的探索'),
-  }, log('decompose_goal', async (args) => {
-    return jsonResult(await decomposeGoal(getCtx(), args));
+  }, log('decompose_witem', async (args) => {
+    return jsonResult(await decomposeWitem(getCtx(), args));
   }));
 
-  server.tool('update_goal_status', '更新目标状态', {
-    goal_id: z.string().describe('目标 ID'),
+  server.tool('update_witem_status', '更新目标状态', {
+    witem_id: z.string().describe('目标 ID'),
     new_status: z.enum(['active', 'achieved', 'abandoned', 'deferred']).describe('新状态'),
     reason: z.string().describe('变更原因'),
-  }, log('update_goal_status', async (args) => {
-    return jsonResult(await updateGoalStatus(getCtx(), args));
-  }));
-
-  // --- 任务 ---
-  server.tool('create_task', '创建一个任务（粒度：一个可交付的工作单元，如功能/缺陷修复/技术预研，不是执行步骤）', {
-    title: z.string().describe('任务标题'),
-    description: z.string().optional().describe('详细描述'),
-    priority: z.enum(['critical', 'high', 'medium', 'low']).optional().describe('优先级'),
-    parent_goal: z.string().optional().describe('所属目标 ID'),
-    tags: z.array(z.string()).optional().describe('标签'),
-  }, log('create_task', async (args) => {
-    return jsonResult(await createTask(getCtx(), args));
-  }));
-
-  server.tool('update_task_status', '更新任务状态', {
-    task_id: z.string().describe('任务 ID'),
-    new_status: z.enum(['open', 'in_progress', 'done', 'cancelled']).describe('新状态'),
-    reason: z.string().optional().describe('变更原因'),
-  }, log('update_task_status', async (args) => {
-    return jsonResult(await updateTaskStatus(getCtx(), args));
-  }));
-
-  // --- 探索 ---
-  server.tool('begin_exploration', '开始一个探索性调查', {
-    topic: z.string().describe('探索主题'),
-    hypothesis: z.string().optional().describe('假设'),
-    reason: z.string().describe('为什么要探索'),
-    approach: z.string().optional().describe('探索方法'),
-    related_goals: z.array(z.string()).optional().describe('关联目标 ID'),
-    triggered_by: z.string().optional().describe('触发此探索的节点 ID'),
-    tags: z.array(z.string()).optional().describe('标签'),
-  }, log('begin_exploration', async (args) => {
-    return jsonResult(await beginExploration(getCtx(), args));
-  }));
-
-  server.tool('record_exploration_finding', '记录探索过程中的发现', {
-    exploration_id: z.string().describe('探索 ID'),
-    finding: z.string().describe('发现内容'),
-    significance: z.enum(['minor', 'major', 'breakthrough']).describe('重要程度'),
-    related_nodes: z.array(z.string()).optional().describe('关联节点 ID'),
-  }, log('record_exploration_finding', async (args) => {
-    return jsonResult(await recordExplorationFinding(getCtx(), args));
-  }));
-
-  server.tool('conclude_exploration', '结论化探索，产出决策/知识', {
-    exploration_id: z.string().describe('探索 ID'),
-    conclusion: z.string().describe('结论'),
-    outcome: z.enum(['validated', 'invalidated', 'partial', 'inconclusive']).describe('结果类型'),
-    decisions: z.array(z.object({
-      title: z.string(), context: z.string().optional(),
-      rationale: z.string(), consequences: z.array(z.string()).optional(),
-    })).optional().describe('产出的决策'),
-    knowledge: z.array(z.object({
-      title: z.string(), domain: z.string(),
-      description: z.string(), confidence: z.enum(['low', 'medium', 'high']).optional(),
-    })).optional().describe('产出的知识'),
-  }, log('conclude_exploration', async (args) => {
-    return jsonResult(await concludeExploration(getCtx(), args));
-  }));
-
-  server.tool('abandon_exploration', '放弃探索', {
-    exploration_id: z.string().describe('探索 ID'),
-    reason: z.string().describe('放弃原因'),
-    learnings: z.string().optional().describe('尽管失败但学到的东西'),
-  }, log('abandon_exploration', async (args) => {
-    return jsonResult(await abandonExploration(getCtx(), args));
+  }, log('update_witem_status', async (args) => {
+    return jsonResult(await updateWitemStatus(getCtx(), args));
   }));
 
   // --- 决策 ---
@@ -432,8 +350,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
       cons: z.array(z.string()).optional(), reason_rejected: z.string(),
     })).optional().describe('考虑过的备选方案'),
     consequences: z.array(z.string()).optional().describe('接受的代价'),
-    related_goals: z.array(z.string()).optional().describe('关联目标'),
-    related_explorations: z.array(z.string()).optional().describe('关联探索'),
+    related_witems: z.array(z.string()).optional().describe('关联目标'),
     supersedes: z.string().optional().describe('取代的旧决策 ID'),
     risks_created: z.array(z.object({
       title: z.string(), description: z.string(),
@@ -450,6 +367,14 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await recordDecision(getCtx(), args));
   }));
 
+  server.tool('update_decision_status', '更新决策生命周期状态（兑现度回写：撤销/证伪置 failed）', {
+    decision_id: z.string().describe('决策 ID'),
+    new_status: z.enum(['accepted', 'superseded', 'deprecated', 'failed']).describe('新状态'),
+    reason: z.string().describe('变更原因'),
+  }, log('update_decision_status', async (args) => {
+    return jsonResult(await updateDecisionStatus(getCtx(), args));
+  }));
+
   // --- 需求 ---
   server.tool('define_requirement', '定义一个需求', {
     title: z.string().describe('需求标题'),
@@ -457,7 +382,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     priority: z.enum(['critical', 'high', 'medium', 'low']).optional().describe('优先级'),
     source: z.string().describe('来源（oral / specs-md / docs-md / issue / meeting）'),
     source_detail: z.string().optional().describe('来源详情'),
-    parent_goal: z.string().optional().describe('关联目标 ID'),
+    parent_witem: z.string().optional().describe('关联目标 ID'),
     tags: z.array(z.string()).optional().describe('标签'),
     acceptance: z.object({
       type: z.literal('checklist'),
@@ -535,7 +460,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     likelihood: z.enum(['low', 'medium', 'high']).describe('发生概率'),
     impact: z.enum(['low', 'medium', 'high', 'critical']).describe('影响程度'),
     trigger_conditions: z.array(z.string()).optional().describe('触发条件'),
-    affected_goals: z.array(z.string()).optional().describe('受影响的目标 ID'),
+    affected_witems: z.array(z.string()).optional().describe('受影响的目标 ID'),
     mitigation_strategy: z.string().optional().describe('缓解策略'),
     tags: z.array(z.string()).optional().describe('标签'),
   }, log('identify_risk', async (args) => {
@@ -606,24 +531,11 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
   // --- 批量操作 ---
   server.tool('batch_operations', '批量执行多个操作（一次调用完成多项更新，部分失败不中断）', {
     operations: z.array(z.object({
-      op: z.string().describe('操作名称，如 backfill_task、conclude_exploration、delete_node 等'),
+      op: z.string().describe('操作名称，如 update_witem_status、delete_node 等'),
       params: z.record(z.unknown()).describe('该操作的参数'),
     })).describe('要执行的操作列表，最多 50 个'),
   }, log('batch_operations', async (args) => {
     return jsonResult(await batchOperations(getCtx(), args, operationHandlers));
-  }));
-
-  // --- 蒸馏 ---
-  server.tool('distill_conversation', '从对话中蒸馏 WHY 知识（决策/知识/风险），返回变更建议', {
-    messages: z.array(z.object({
-      role: z.string().describe('消息角色'),
-      content: z.string().describe('消息内容'),
-    })).optional().describe('对话消息列表'),
-    text: z.string().optional().describe('原始对话文本（与 messages 二选一）'),
-    focus_types: z.array(z.enum(['decision', 'knowledge', 'risk'])).optional()
-      .describe('限定提取的节点类型，默认全部'),
-  }, log('distill_conversation', async (args) => {
-    return jsonResult(await distillConversation(getCtx(), args));
   }));
 
   // --- 读操作 ---
@@ -634,7 +546,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
   server.tool('cockpit', '驾驶舱视图：目标 + 进度 + 阻塞项', {}, log('cockpit', async () => {
     const state = await getProjectState(getCtx());
     const blockers = await currentBlockers(getCtx());
-    return jsonResult({ goals: state.active_goals, requirements: state.requirements, blockers: blockers.blockers });
+    return jsonResult({ witems: state.active_witems, requirements: state.requirements, blockers: blockers.blockers });
   }));
 
   server.tool('get_node_context', '获取节点完整上下文', {
@@ -651,15 +563,15 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
   }));
 
   server.tool('get_roadmap', '获取目标路线图', {
-    root_goal: z.string().optional().describe('根目标 ID'),
+    root_witem: z.string().optional().describe('根目标 ID'),
     include_completed: z.boolean().optional().describe('是否包含已完成的目标'),
     max_depth: z.number().optional().describe('最大展开深度'),
   }, log('get_roadmap', async (args) => {
     return jsonResult(await getRoadmap(getCtx(), args));
   }));
 
-  server.tool('goal_progress', '获取活跃目标进度', {}, log('goal_progress', async () => {
-    return jsonResult(await goalProgress(getCtx()));
+  server.tool('witem_progress', '获取活跃工作项进度', {}, log('witem_progress', async () => {
+    return jsonResult(await witemProgress(getCtx()));
   }));
 
   server.tool('decision_trail', '追溯决策链', {
@@ -737,113 +649,39 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
   }));
 
   // --- 目标 ---
-  server.tool('define_goal', '定义一个项目目标', {
+  server.tool('define_witem', '定义一个项目目标', {
     project: projectParam,
     title: z.string().describe('目标标题'),
     description: z.string().optional().describe('详细描述'),
     horizon: z.enum(['short', 'medium', 'long']).describe('时间范围'),
     success_criteria: z.array(z.string()).optional().describe('成功标准'),
     priority: z.enum(['critical', 'high', 'medium', 'low']).describe('优先级'),
-    parent_goal: z.string().optional().describe('父目标 ID'),
+    parent_witem: z.string().optional().describe('父目标 ID'),
     tags: z.array(z.string()).optional().describe('标签'),
-  }, log('define_goal', async ({ project, ...args }) => {
-    return jsonResult(await defineGoal(await ctx(project), args));
+  }, log('define_witem', async ({ project, ...args }) => {
+    return jsonResult(await defineWitem(await ctx(project), args));
   }));
 
-  server.tool('decompose_goal', '将目标分解为子目标和需要的探索', {
+  server.tool('decompose_witem', '将目标分解为子目标', {
     project: projectParam,
-    goal_id: z.string().describe('要分解的目标 ID'),
+    witem_id: z.string().describe('要分解的目标 ID'),
     sub_goals: z.array(z.object({
       title: z.string(), description: z.string().optional(),
       horizon: z.enum(['short', 'medium', 'long']),
       success_criteria: z.array(z.string()).optional(),
       priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
     })).optional().describe('子目标列表'),
-    explorations_needed: z.array(z.object({
-      topic: z.string(), reason: z.string(), hypothesis: z.string().optional(),
-    })).optional().describe('需要的探索'),
-  }, log('decompose_goal', async ({ project, ...args }) => {
-    return jsonResult(await decomposeGoal(await ctx(project), args));
+  }, log('decompose_witem', async ({ project, ...args }) => {
+    return jsonResult(await decomposeWitem(await ctx(project), args));
   }));
 
-  server.tool('update_goal_status', '更新目标状态', {
+  server.tool('update_witem_status', '更新目标状态', {
     project: projectParam,
-    goal_id: z.string().describe('目标 ID'),
+    witem_id: z.string().describe('目标 ID'),
     new_status: z.enum(['active', 'achieved', 'abandoned', 'deferred']).describe('新状态'),
     reason: z.string().describe('变更原因'),
-  }, log('update_goal_status', async ({ project, ...args }) => {
-    return jsonResult(await updateGoalStatus(await ctx(project), args));
-  }));
-
-  // --- 任务 ---
-  server.tool('create_task', '创建一个任务（粒度：一个可交付的工作单元，如功能/缺陷修复/技术预研，不是执行步骤）', {
-    project: projectParam,
-    title: z.string().describe('任务标题'),
-    description: z.string().optional().describe('详细描述'),
-    priority: z.enum(['critical', 'high', 'medium', 'low']).optional().describe('优先级'),
-    parent_goal: z.string().optional().describe('所属目标 ID'),
-    tags: z.array(z.string()).optional().describe('标签'),
-  }, log('create_task', async ({ project, ...args }) => {
-    return jsonResult(await createTask(await ctx(project), args));
-  }));
-
-  server.tool('update_task_status', '更新任务状态', {
-    project: projectParam,
-    task_id: z.string().describe('任务 ID'),
-    new_status: z.enum(['open', 'in_progress', 'done', 'cancelled']).describe('新状态'),
-    reason: z.string().optional().describe('变更原因'),
-  }, log('update_task_status', async ({ project, ...args }) => {
-    return jsonResult(await updateTaskStatus(await ctx(project), args));
-  }));
-
-  // --- 探索 ---
-  server.tool('begin_exploration', '开始一个探索性调查', {
-    project: projectParam,
-    topic: z.string().describe('探索主题'),
-    hypothesis: z.string().optional().describe('假设'),
-    reason: z.string().describe('为什么要探索'),
-    approach: z.string().optional().describe('探索方法'),
-    related_goals: z.array(z.string()).optional().describe('关联目标 ID'),
-    triggered_by: z.string().optional().describe('触发此探索的节点 ID'),
-    tags: z.array(z.string()).optional().describe('标签'),
-  }, log('begin_exploration', async ({ project, ...args }) => {
-    return jsonResult(await beginExploration(await ctx(project), args));
-  }));
-
-  server.tool('record_exploration_finding', '记录探索过程中的发现', {
-    project: projectParam,
-    exploration_id: z.string().describe('探索 ID'),
-    finding: z.string().describe('发现内容'),
-    significance: z.enum(['minor', 'major', 'breakthrough']).describe('重要程度'),
-    related_nodes: z.array(z.string()).optional().describe('关联节点 ID'),
-  }, log('record_exploration_finding', async ({ project, ...args }) => {
-    return jsonResult(await recordExplorationFinding(await ctx(project), args));
-  }));
-
-  server.tool('conclude_exploration', '结论化探索', {
-    project: projectParam,
-    exploration_id: z.string().describe('探索 ID'),
-    conclusion: z.string().describe('结论'),
-    outcome: z.enum(['validated', 'invalidated', 'partial', 'inconclusive']).describe('结果类型'),
-    decisions: z.array(z.object({
-      title: z.string(), context: z.string().optional(),
-      rationale: z.string(), consequences: z.array(z.string()).optional(),
-    })).optional().describe('产出的决策'),
-    knowledge: z.array(z.object({
-      title: z.string(), domain: z.string(),
-      description: z.string(), confidence: z.enum(['low', 'medium', 'high']).optional(),
-    })).optional().describe('产出的知识'),
-  }, log('conclude_exploration', async ({ project, ...args }) => {
-    return jsonResult(await concludeExploration(await ctx(project), args));
-  }));
-
-  server.tool('abandon_exploration', '放弃探索', {
-    project: projectParam,
-    exploration_id: z.string().describe('探索 ID'),
-    reason: z.string().describe('放弃原因'),
-    learnings: z.string().optional().describe('学到的东西'),
-  }, log('abandon_exploration', async ({ project, ...args }) => {
-    return jsonResult(await abandonExploration(await ctx(project), args));
+  }, log('update_witem_status', async ({ project, ...args }) => {
+    return jsonResult(await updateWitemStatus(await ctx(project), args));
   }));
 
   // --- 决策 ---
@@ -857,8 +695,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
       cons: z.array(z.string()).optional(), reason_rejected: z.string(),
     })).optional().describe('备选方案'),
     consequences: z.array(z.string()).optional().describe('代价'),
-    related_goals: z.array(z.string()).optional(),
-    related_explorations: z.array(z.string()).optional(),
+    related_witems: z.array(z.string()).optional(),
     supersedes: z.string().optional(),
     risks_created: z.array(z.object({
       title: z.string(), description: z.string(),
@@ -875,6 +712,15 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await recordDecision(await ctx(project), args));
   }));
 
+  server.tool('update_decision_status', '更新决策生命周期状态（兑现度回写：撤销/证伪置 failed）', {
+    project: projectParam,
+    decision_id: z.string().describe('决策 ID'),
+    new_status: z.enum(['accepted', 'superseded', 'deprecated', 'failed']).describe('新状态'),
+    reason: z.string().describe('变更原因'),
+  }, log('update_decision_status', async ({ project, ...args }) => {
+    return jsonResult(await updateDecisionStatus(await ctx(project), args));
+  }));
+
   // --- 需求 ---
   server.tool('define_requirement', '定义一个需求', {
     project: projectParam,
@@ -883,7 +729,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     priority: z.enum(['critical', 'high', 'medium', 'low']).optional().describe('优先级'),
     source: z.string().describe('来源（oral / specs-md / docs-md / issue / meeting）'),
     source_detail: z.string().optional().describe('来源详情'),
-    parent_goal: z.string().optional().describe('关联目标 ID'),
+    parent_witem: z.string().optional().describe('关联目标 ID'),
     tags: z.array(z.string()).optional().describe('标签'),
     acceptance: z.object({
       type: z.literal('checklist'),
@@ -966,7 +812,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     likelihood: z.enum(['low', 'medium', 'high']),
     impact: z.enum(['low', 'medium', 'high', 'critical']),
     trigger_conditions: z.array(z.string()).optional(),
-    affected_goals: z.array(z.string()).optional(),
+    affected_witems: z.array(z.string()).optional(),
     mitigation_strategy: z.string().optional(),
     tags: z.array(z.string()).optional(),
   }, log('identify_risk', async ({ project, ...args }) => {
@@ -1044,20 +890,6 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await batchOperations(await ctx(project), args, operationHandlers));
   }));
 
-  // --- 蒸馏 ---
-  server.tool('distill_conversation', '从对话中蒸馏 WHY 知识（决策/知识/风险），返回变更建议', {
-    project: projectParam,
-    messages: z.array(z.object({
-      role: z.string().describe('消息角色'),
-      content: z.string().describe('消息内容'),
-    })).optional().describe('对话消息列表'),
-    text: z.string().optional().describe('原始对话文本（与 messages 二选一）'),
-    focus_types: z.array(z.enum(['decision', 'knowledge', 'risk'])).optional()
-      .describe('限定提取的节点类型，默认全部'),
-  }, log('distill_conversation', async ({ project, ...args }) => {
-    return jsonResult(await distillConversation(await ctx(project), args));
-  }));
-
   // --- 读操作 ---
   server.tool('get_project_state', '获取项目认知状态快照', { project: projectParam }, log('get_project_state', async ({ project }) => {
     return jsonResult(await getProjectState(await ctx(project)));
@@ -1066,7 +898,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
   server.tool('cockpit', '驾驶舱视图：目标 + 进度 + 阻塞项', { project: projectParam }, log('cockpit', async ({ project }) => {
     const state = await getProjectState(await ctx(project));
     const blockers = await currentBlockers(await ctx(project));
-    return jsonResult({ goals: state.active_goals, requirements: state.requirements, blockers: blockers.blockers });
+    return jsonResult({ witems: state.active_witems, requirements: state.requirements, blockers: blockers.blockers });
   }));
 
   server.tool('get_node_context', '获取节点完整上下文', {
@@ -1081,14 +913,14 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
   }));
 
   server.tool('get_roadmap', '获取路线图', {
-    project: projectParam, root_goal: z.string().optional(),
+    project: projectParam, root_witem: z.string().optional(),
     include_completed: z.boolean().optional(), max_depth: z.number().optional(),
   }, log('get_roadmap', async ({ project, ...args }) => {
     return jsonResult(await getRoadmap(await ctx(project), args));
   }));
 
-  server.tool('goal_progress', '获取目标进度', { project: projectParam }, log('goal_progress', async ({ project }) => {
-    return jsonResult(await goalProgress(await ctx(project)));
+  server.tool('witem_progress', '获取活跃工作项进度', { project: projectParam }, log('witem_progress', async ({ project }) => {
+    return jsonResult(await witemProgress(await ctx(project)));
   }));
 
   server.tool('decision_trail', '追溯决策链', { project: projectParam, node_id: z.string() }, log('decision_trail', async ({ project, node_id }) => {

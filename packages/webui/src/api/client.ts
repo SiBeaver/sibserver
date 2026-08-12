@@ -193,19 +193,19 @@ export function fetchActivity(slug: string, limit = 20) {
   return get<ActivityResponse>(`/${slug}/api/v1/activity?limit=${limit}`);
 }
 
-export interface GoalProgressItem {
-  goal: import('../lib/types').CognitiveNode;
+export interface WitemProgressItem {
+  witem: import('../lib/types').CognitiveNode;
   total: number;
   done: number;
   percentage: number;
 }
 
-export interface GoalProgressResponse {
-  goals: GoalProgressItem[];
+export interface WitemProgressResponse {
+  witems: WitemProgressItem[];
 }
 
-export function fetchGoalProgress(slug: string) {
-  return get<GoalProgressResponse>(`/${slug}/api/v1/goals/progress`);
+export function fetchWitemProgress(slug: string) {
+  return get<WitemProgressResponse>(`/${slug}/api/v1/witems/progress`);
 }
 
 export interface StaleItemsResponse {

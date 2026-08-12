@@ -81,13 +81,10 @@ export function HelmSignalCard({ signal, slug, onAction }: Props) {
       case 'stale':
         return (
           <Popconfirm title="确认放弃？" onConfirm={() => {
-            const op = signal.node.type === 'goal' ? 'update-goal-status' :
-              signal.node.type === 'exploration' ? 'abandon-exploration' : 'update-risk';
-            const input = signal.node.type === 'goal'
-              ? { goal_id: signal.node.id, new_status: 'abandoned' }
-              : signal.node.type === 'exploration'
-                ? { exploration_id: signal.node.id, reason: '长期停滞', learnings: '' }
-                : { risk_id: signal.node.id, new_status: 'accepted' };
+            const op = signal.node.type === 'witem' ? 'update-witem-status' : 'update-risk';
+            const input = signal.node.type === 'witem'
+              ? { witem_id: signal.node.id, new_status: 'abandoned' }
+              : { risk_id: signal.node.id, new_status: 'accepted' };
             handleAction(op, input);
           }}>
             <Button size="small" danger>放弃</Button>

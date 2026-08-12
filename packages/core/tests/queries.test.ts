@@ -3,13 +3,11 @@ import { createTestDb } from './helpers/test-db.js';
 import type { Sql } from '../src/storage/db.js';
 import { OperationContext } from '../src/operations/context.js';
 import {
-  defineGoal, decomposeGoal, updateGoalStatus,
-  beginExploration, concludeExploration,
+  defineWitem, decomposeWitem, updateWitemStatus,
   recordDecision,
-  createTask, updateTaskStatus,
   identifyRisk, registerTechDebt,
   recordKnowledge,
-  getRoadmap, goalProgress, decisionTrail, knowledgeMap,
+  getRoadmap, witemProgress, decisionTrail, knowledgeMap,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
 } from '../src/operations/index.js';
 
@@ -40,37 +38,37 @@ describe('Query Operations', () => {
     });
 
     it('应该返回顶层目标树', async () => {
-      const goal = await defineGoal(ctx, { title: '顶层目标', horizon: 'long', priority: 'high' });
-      await decomposeGoal(ctx, {
-        goal_id: goal.goal.id,
-        sub_goals: [{ title: '子目标1', horizon: 'short' }],
+      const goal = await defineWitem(ctx, { title: '顶层目标', horizon: 'long', priority: 'high' });
+      await decomposeWitem(ctx, {
+        witem_id: goal.witem.id,
+        sub_witems: [{ title: '子目标1', horizon: 'short' }],
       });
 
       const result = await getRoadmap(ctx);
       expect(result.roadmap).toHaveLength(1);
-      expect(result.roadmap[0].node.id).toBe(goal.goal.id);
+      expect(result.roadmap[0].node.id).toBe(goal.witem.id);
       expect(result.roadmap[0].children).toHaveLength(1);
       expect(result.roadmap[0].progress.total).toBe(1);
       expect(result.roadmap[0].progress.done).toBe(0);
     });
 
     it('应该支持指定根目标', async () => {
-      const parent = await defineGoal(ctx, { title: '父', horizon: 'long', priority: 'high' });
-      const decomposed = await decomposeGoal(ctx, {
-        goal_id: parent.goal.id,
-        sub_goals: [{ title: '子', horizon: 'short' }],
+      const parent = await defineWitem(ctx, { title: '父', horizon: 'long', priority: 'high' });
+      const decomposed = await decomposeWitem(ctx, {
+        witem_id: parent.witem.id,
+        sub_witems: [{ title: '子', horizon: 'short' }],
       });
 
-      const childId = decomposed.sub_goals_created[0].id;
-      const result = await getRoadmap(ctx, { root_goal: childId });
+      const childId = decomposed.sub_witems_created[0].id;
+      const result = await getRoadmap(ctx, { root_witem: childId });
       expect(result.roadmap).toHaveLength(1);
       expect(result.roadmap[0].node.id).toBe(childId);
     });
 
     it('应该过滤已完成目标（默认）', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'high' });
-      await updateGoalStatus(ctx, {
-        goal_id: goal.goal.id,
+      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      await updateWitemStatus(ctx, {
+        witem_id: goal.witem.id,
         new_status: 'achieved',
         reason: '完成',
       });
@@ -84,30 +82,28 @@ describe('Query Operations', () => {
   });
 
   // ============================================================
-  // goalProgress
+  // witemProgress
   // ============================================================
 
-  describe('goalProgress', () => {
+  describe('witemProgress', () => {
     it('应该返回空进度', async () => {
-      const result = await goalProgress(ctx);
-      expect(result.goals).toHaveLength(0);
+      const result = await witemProgress(ctx);
+      expect(result.witems).toHaveLength(0);
     });
 
     it('应该计算目标子项完成率', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'high' });
-      const t1 = await createTask(ctx, { title: '任务1', parent_goal: goal.goal.id });
-      const t2 = await createTask(ctx, { title: '任务2', parent_goal: goal.goal.id });
+      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      const child1 = await defineWitem(ctx, { title: '子项1', horizon: 'short', priority: 'medium', parent_witem: goal.witem.id });
+      const child2 = await defineWitem(ctx, { title: '子项2', horizon: 'short', priority: 'medium', parent_witem: goal.witem.id });
 
-      // 完成其中一个任务
-      const taskId = t1.task.id;
-      await updateTaskStatus(ctx, { task_id: taskId, new_status: 'in_progress' });
-      await updateTaskStatus(ctx, { task_id: taskId, new_status: 'done' });
+      // 完成其中一个子项
+      await updateWitemStatus(ctx, { witem_id: child1.witem.id, new_status: 'achieved', reason: '完成' });
 
-      const result = await goalProgress(ctx);
-      expect(result.goals).toHaveLength(1);
-      expect(result.goals[0].total).toBe(2);
-      expect(result.goals[0].done).toBe(1);
-      expect(result.goals[0].percentage).toBe(50);
+      const result = await witemProgress(ctx);
+      expect(result.witems).toHaveLength(2);
+      const parent = result.witems.find(w => w.total === 2)!;
+      expect(parent.done).toBe(1);
+      expect(parent.percentage).toBe(50);
     });
   });
 
@@ -117,20 +113,20 @@ describe('Query Operations', () => {
 
   describe('decisionTrail', () => {
     it('应该追溯决策链', async () => {
-      const exp = await beginExploration(ctx, { topic: '探索', reason: '原因' });
-      const concluded = await concludeExploration(ctx, {
-        exploration_id: exp.exploration.id,
-        conclusion: '结论',
-        outcome: 'validated',
-        decisions: [{ title: '决策', rationale: '原因' }],
+      const anchor = await defineWitem(ctx, { title: '锚', horizon: 'short', priority: 'medium' });
+      const first = await recordDecision(ctx, {
+        title: '旧决策', context: '情境', rationale: '原因',
+        related_witems: [anchor.witem.id],
+      });
+      const second = await recordDecision(ctx, {
+        title: '新决策', context: '情境', rationale: '原因',
+        supersedes: first.decision.id,
       });
 
-      const decisionId = concluded.decisions_created[0].id;
-      const result = await decisionTrail(ctx, decisionId);
+      const result = await decisionTrail(ctx, second.decision.id);
 
-      expect(result.root.id).toBe(decisionId);
-      expect(result.trail.length).toBeGreaterThanOrEqual(1);
-      expect(result.trail.some(t => t.node.id === exp.exploration.id)).toBe(true);
+      expect(result.root.id).toBe(second.decision.id);
+      expect(result.trail.some(t => t.node.id === first.decision.id)).toBe(true);
     });
 
     it('应该拒绝不存在的节点', async () => {
@@ -166,23 +162,23 @@ describe('Query Operations', () => {
   describe('staleItems', () => {
     it('应该返回过期节点', async () => {
       // 创建一个目标然后手动修改 updated_at 到过去
-      const goal = await defineGoal(ctx, { title: '旧目标', horizon: 'short', priority: 'low' });
+      const goal = await defineWitem(ctx, { title: '旧目标', horizon: 'short', priority: 'low' });
       const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
-      const node = await ctx.nodes.getById(goal.goal.id)!;
+      const node = await ctx.nodes.getById(goal.witem.id)!;
       await ctx.nodes.update({ ...node, updated_at: oldDate } as any);
 
       const result = await staleItems(ctx, 7);
       expect(result.stale_items).toHaveLength(1);
-      expect(result.stale_items[0].id).toBe(goal.goal.id);
+      expect(result.stale_items[0].id).toBe(goal.witem.id);
     });
 
     it('不应该包含已完成的节点', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'low' });
-      await updateGoalStatus(ctx, { goal_id: goal.goal.id, new_status: 'achieved', reason: '完成' });
+      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'low' });
+      await updateWitemStatus(ctx, { witem_id: goal.witem.id, new_status: 'achieved', reason: '完成' });
 
       // 手动设为过期
       const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
-      const node = await ctx.nodes.getById(goal.goal.id)!;
+      const node = await ctx.nodes.getById(goal.witem.id)!;
       await ctx.nodes.update({ ...node, updated_at: oldDate } as any);
 
       const result = await staleItems(ctx, 7);
@@ -196,13 +192,13 @@ describe('Query Operations', () => {
 
   describe('currentBlockers', () => {
     it('应该找到阻塞目标的风险', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
       await identifyRisk(ctx, {
         title: '阻塞风险',
         description: '问题',
         likelihood: 'high',
         impact: 'critical',
-        affected_goals: [goal.goal.id],
+        affected_witems: [goal.witem.id],
       });
 
       const result = await currentBlockers(ctx);
@@ -212,7 +208,7 @@ describe('Query Operations', () => {
     });
 
     it('应该返回空列表（无阻塞）', async () => {
-      await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
       const result = await currentBlockers(ctx);
       expect(result.blockers).toHaveLength(0);
     });
@@ -224,17 +220,17 @@ describe('Query Operations', () => {
 
   describe('recentActivity', () => {
     it('应该返回最近事件', async () => {
-      await defineGoal(ctx, { title: '目标1', horizon: 'short', priority: 'high' });
-      await defineGoal(ctx, { title: '目标2', horizon: 'short', priority: 'medium' });
+      await defineWitem(ctx, { title: '目标1', horizon: 'short', priority: 'high' });
+      await defineWitem(ctx, { title: '目标2', horizon: 'short', priority: 'medium' });
 
       const result = await recentActivity(ctx, 10);
       expect(result.events.length).toBeGreaterThanOrEqual(2);
     });
 
     it('应该尊重 limit', async () => {
-      await defineGoal(ctx, { title: '目标1', horizon: 'short', priority: 'high' });
-      await defineGoal(ctx, { title: '目标2', horizon: 'short', priority: 'medium' });
-      await defineGoal(ctx, { title: '目标3', horizon: 'short', priority: 'low' });
+      await defineWitem(ctx, { title: '目标1', horizon: 'short', priority: 'high' });
+      await defineWitem(ctx, { title: '目标2', horizon: 'short', priority: 'medium' });
+      await defineWitem(ctx, { title: '目标3', horizon: 'short', priority: 'low' });
 
       const result = await recentActivity(ctx, 2);
       expect(result.events).toHaveLength(2);
@@ -247,8 +243,8 @@ describe('Query Operations', () => {
 
   describe('fullTextSearch', () => {
     it('应该搜索节点标题和描述', async () => {
-      await defineGoal(ctx, { title: 'WebSocket 重连', horizon: 'short', priority: 'high' });
-      await createTask(ctx, { title: '普通任务' });
+      await defineWitem(ctx, { title: 'WebSocket 重连', horizon: 'short', priority: 'high' });
+      await defineWitem(ctx, { title: '普通工作项', horizon: 'short', priority: 'medium' });
 
       const result = await fullTextSearch(ctx, 'WebSocket');
       expect(result.count).toBe(1);

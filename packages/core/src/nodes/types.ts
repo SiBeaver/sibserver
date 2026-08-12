@@ -5,9 +5,7 @@ import { z } from 'zod';
 // ============================================================
 
 export const NodeType = z.enum([
-  'goal',
-  'task',
-  'exploration',
+  'witem',
   'decision',
   'risk',
   'tech_debt',
@@ -24,16 +22,10 @@ export type Priority = z.infer<typeof Priority>;
 // 各节点类型的 status 枚举
 // ============================================================
 
-export const GoalStatus = z.enum(['active', 'achieved', 'abandoned', 'deferred']);
-export type GoalStatus = z.infer<typeof GoalStatus>;
+export const WitemStatus = z.enum(['active', 'achieved', 'abandoned', 'deferred']);
+export type WitemStatus = z.infer<typeof WitemStatus>;
 
-export const TaskStatus = z.enum(['open', 'in_progress', 'done', 'cancelled']);
-export type TaskStatus = z.infer<typeof TaskStatus>;
-
-export const ExplorationStatus = z.enum(['proposed', 'active', 'concluded', 'abandoned']);
-export type ExplorationStatus = z.infer<typeof ExplorationStatus>;
-
-export const DecisionStatus = z.enum(['proposed', 'accepted', 'superseded', 'deprecated']);
+export const DecisionStatus = z.enum(['proposed', 'accepted', 'superseded', 'deprecated', 'failed']);
 export type DecisionStatus = z.infer<typeof DecisionStatus>;
 
 export const RiskStatus = z.enum(['identified', 'analyzing', 'mitigated', 'accepted', 'occurred', 'resolved']);
@@ -73,32 +65,14 @@ export type BaseNode = z.infer<typeof BaseNode>;
 // 各节点类型 schema
 // ============================================================
 
-export const GoalNode = BaseNode.extend({
-  type: z.literal('goal'),
-  status: GoalStatus,
+export const WitemNode = BaseNode.extend({
+  type: z.literal('witem'),
+  status: WitemStatus,
   horizon: z.enum(['short', 'medium', 'long']),
   success_criteria: z.array(z.string()).default([]),
   priority: Priority,
 });
-export type GoalNode = z.infer<typeof GoalNode>;
-
-export const TaskNode = BaseNode.extend({
-  type: z.literal('task'),
-  status: TaskStatus,
-  priority: Priority.default('medium'),
-});
-export type TaskNode = z.infer<typeof TaskNode>;
-
-export const ExplorationNode = BaseNode.extend({
-  type: z.literal('exploration'),
-  status: ExplorationStatus,
-  hypothesis: z.string().default(''),
-  approach: z.string().default(''),
-  findings: z.array(z.string()).default([]),
-  conclusion: z.string().nullable().default(null),
-  outcome: z.enum(['validated', 'invalidated', 'partial', 'inconclusive']).nullable().default(null),
-});
-export type ExplorationNode = z.infer<typeof ExplorationNode>;
+export type WitemNode = z.infer<typeof WitemNode>;
 
 export const AlternativeConsidered = z.object({
   option: z.string(),
@@ -201,9 +175,7 @@ export type RequirementNode = z.infer<typeof RequirementNode>;
 // ============================================================
 
 export const CognitiveNode = z.discriminatedUnion('type', [
-  GoalNode,
-  TaskNode,
-  ExplorationNode,
+  WitemNode,
   DecisionNode,
   RiskNode,
   TechDebtNode,

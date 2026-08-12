@@ -1,13 +1,13 @@
 import type { OperationContext } from './context.js';
-import type { CognitiveNode, GoalNode } from '../nodes/types.js';
+import type { CognitiveNode } from '../nodes/types.js';
 import type { Edge } from '../edges/types.js';
 
 // ============================================================
-// get_roadmap — 获取目标路线图（树状结构）
+// get_roadmap — 获取工作项路线图（树状结构）
 // ============================================================
 
 export interface GetRoadmapInput {
-  root_goal?: string;
+  root_witem?: string;
   include_completed?: boolean;
   max_depth?: number;
 }
@@ -25,7 +25,7 @@ export async function getRoadmap(ctx: OperationContext, input: GetRoadmapInput =
   async function buildTree(nodeId: string, depth: number): Promise<RoadmapItem | null> {
     const node = await ctx.nodes.getById(nodeId);
     if (!node) return null;
-    if (!includeCompleted && (node.status === 'achieved' || node.status === 'abandoned' || node.status === 'concluded' || node.status === 'deprecated')) {
+    if (!includeCompleted && (node.status === 'achieved' || node.status === 'abandoned' || node.status === 'deprecated')) {
       return null;
     }
 
@@ -33,7 +33,7 @@ export async function getRoadmap(ctx: OperationContext, input: GetRoadmapInput =
     if (depth < maxDepth) {
       const edges = await ctx.edges.getBySource(nodeId);
       for (const edge of edges) {
-        if (edge.relation === 'decomposes_into' || edge.relation === 'spawns') {
+        if (edge.relation === 'decomposes_into') {
           const child = await buildTree(edge.target_id, depth + 1);
           if (child) children.push(child);
         }
@@ -49,33 +49,33 @@ export async function getRoadmap(ctx: OperationContext, input: GetRoadmapInput =
       }
     } else {
       total = 1;
-      done = (node.status === 'achieved' || node.status === 'concluded') ? 1 : 0;
+      done = (node.status === 'achieved') ? 1 : 0;
     }
 
     return { node, children, progress: { total, done } };
   }
 
-  if (input.root_goal) {
-    const tree = await buildTree(input.root_goal, 0);
-    if (!tree) throw new Error(`目标不存在：${input.root_goal}`);
+  if (input.root_witem) {
+    const tree = await buildTree(input.root_witem, 0);
+    if (!tree) throw new Error(`工作项不存在：${input.root_witem}`);
     return { roadmap: [tree] };
   }
 
-  // 找所有顶层 goal（没有父 goal 的）
-  const allGoals = await ctx.nodes.getByType('goal');
-  const childGoalIds = new Set<string>();
-  for (const goal of allGoals) {
-    const incomingEdges = await ctx.edges.getByTarget(goal.id);
+  // 找所有顶层 witem（没有父 witem 的）
+  const allWitems = await ctx.nodes.getByType('witem');
+  const childWitemIds = new Set<string>();
+  for (const witem of allWitems) {
+    const incomingEdges = await ctx.edges.getByTarget(witem.id);
     for (const e of incomingEdges) {
       if (e.relation === 'decomposes_into') {
-        childGoalIds.add(goal.id);
+        childWitemIds.add(witem.id);
       }
     }
   }
 
-  const rootGoals = allGoals.filter(g => !childGoalIds.has(g.id));
+  const rootWitems = allWitems.filter(g => !childWitemIds.has(g.id));
   const roadmap: RoadmapItem[] = [];
-  for (const g of rootGoals) {
+  for (const g of rootWitems) {
     if (!includeCompleted && (g.status === 'achieved' || g.status === 'abandoned')) continue;
     const tree = await buildTree(g.id, 0);
     if (tree) roadmap.push(tree);
@@ -85,36 +85,36 @@ export async function getRoadmap(ctx: OperationContext, input: GetRoadmapInput =
 }
 
 // ============================================================
-// goal_progress — 目标进度（含子项完成率）
+// witem_progress — 工作项进度（含子项完成率）
 // ============================================================
 
-export async function goalProgress(ctx: OperationContext) {
-  const goals = await ctx.nodes.getByType('goal');
-  const results: { goal: CognitiveNode; total: number; done: number; percentage: number }[] = [];
+export async function witemProgress(ctx: OperationContext) {
+  const witems = await ctx.nodes.getByType('witem');
+  const results: { witem: CognitiveNode; total: number; done: number; percentage: number }[] = [];
 
-  for (const goal of goals) {
-    if (goal.status !== 'active') continue;
-    const edges = await ctx.edges.getBySource(goal.id);
+  for (const witem of witems) {
+    if (witem.status !== 'active') continue;
+    const edges = await ctx.edges.getBySource(witem.id);
     const subItems = (await Promise.all(
       edges
-        .filter(e => e.relation === 'decomposes_into' || e.relation === 'spawns')
+        .filter(e => e.relation === 'decomposes_into')
         .map(e => ctx.nodes.getById(e.target_id))
     )).filter(Boolean) as CognitiveNode[];
 
     const total = subItems.length;
     const done = subItems.filter(n =>
-      n.status === 'achieved' || n.status === 'concluded' || n.status === 'done'
+      n.status === 'achieved'
     ).length;
     const percentage = total > 0 ? Math.round((done / total) * 100) : 0;
 
-    results.push({ goal, total, done, percentage });
+    results.push({ witem, total, done, percentage });
   }
 
-  return { goals: results };
+  return { witems: results };
 }
 
 // ============================================================
-// decision_trail — 追溯决策/探索链
+// decision_trail — 追溯决策链
 // ============================================================
 
 export async function decisionTrail(ctx: OperationContext, nodeId: string) {
@@ -127,7 +127,7 @@ export async function decisionTrail(ctx: OperationContext, nodeId: string) {
 
     const edges = await ctx.edges.getByNode(id);
     for (const edge of edges) {
-      const isRelevant = ['produces', 'informs', 'spawns', 'creates', 'derived_from', 'supersedes'].includes(edge.relation);
+      const isRelevant = ['produces', 'informs', 'creates', 'derived_from', 'supersedes'].includes(edge.relation);
       if (!isRelevant) continue;
 
       // 向上追溯 — 找到指向当前节点的源
@@ -136,6 +136,15 @@ export async function decisionTrail(ctx: OperationContext, nodeId: string) {
         if (sourceNode) {
           trail.push({ node: sourceNode, relation: edge.relation, direction: 'incoming' });
           await trace(edge.source_id);
+        }
+      }
+
+      // 向下追溯 — supersedes 出边指向被取代的旧决策
+      if (edge.relation === 'supersedes' && edge.source_id === id && !visited.has(edge.target_id)) {
+        const targetNode = await ctx.nodes.getById(edge.target_id);
+        if (targetNode) {
+          trail.push({ node: targetNode, relation: edge.relation, direction: 'outgoing' });
+          await trace(edge.target_id);
         }
       }
     }
@@ -176,7 +185,7 @@ export async function knowledgeMap(ctx: OperationContext, domain?: string) {
 export async function staleItems(ctx: OperationContext, days: number = 7) {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const activeStatuses = ['active', 'proposed', 'identified', 'analyzing', 'accepted'];
-  const types = ['goal', 'exploration', 'risk', 'tech_debt'] as const;
+  const types = ['witem', 'risk', 'tech_debt'] as const;
 
   const stale: CognitiveNode[] = [];
   for (const type of types) {
@@ -359,7 +368,7 @@ export async function getHelmSignals(ctx: OperationContext): Promise<HelmRespons
 
   const cutoff7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const cutoff14d = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-  const staleTypes = ['goal', 'exploration', 'risk', 'tech_debt'] as const;
+  const staleTypes = ['witem', 'risk', 'tech_debt'] as const;
   const staleStatuses = ['active', 'proposed', 'identified', 'analyzing', 'accepted'];
   for (const type of staleTypes) {
     const nodes = await ctx.nodes.getByType(type);
@@ -379,10 +388,10 @@ export async function getHelmSignals(ctx: OperationContext): Promise<HelmRespons
     }
   }
 
-  const activeGoals = await ctx.nodes.getByTypeAndStatus('goal', 'active');
+  const activeWitems = await ctx.nodes.getByTypeAndStatus('witem', 'active');
   const cutoff3d = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
-  for (const goal of activeGoals) {
-    const edges = await ctx.edges.getBySource(goal.id);
+  for (const witem of activeWitems) {
+    const edges = await ctx.edges.getBySource(witem.id);
     const decomposeEdges = edges.filter(e => e.relation === 'decomposes_into');
     const children = (await Promise.all(
       decomposeEdges.map(e => ctx.nodes.getById(e.target_id))
@@ -390,12 +399,12 @@ export async function getHelmSignals(ctx: OperationContext): Promise<HelmRespons
     const recentChildren = children.filter(c => c.created_at > cutoff3d);
     if (recentChildren.length > 0) {
       signals.push({
-        id: `goal-review-${goal.id}`,
+        id: `witem-review-${witem.id}`,
         type: 'goal_review',
         urgency: 'medium',
-        title: goal.title,
+        title: witem.title,
         summary: `AI 刚分解出 ${recentChildren.length} 个子项，请确认方向`,
-        node: goal,
+        node: witem,
         context: { nodes: recentChildren, edges: decomposeEdges },
         timestamp: recentChildren[0].created_at,
       });

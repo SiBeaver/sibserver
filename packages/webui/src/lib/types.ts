@@ -12,7 +12,7 @@ export interface ProjectMeta {
 
 export interface CognitiveNode {
   id: string;
-  type: 'goal' | 'task' | 'exploration' | 'decision' | 'risk' | 'tech_debt' | 'artifact' | 'knowledge' | 'requirement';
+  type: 'witem' | 'decision' | 'risk' | 'tech_debt' | 'artifact' | 'knowledge' | 'requirement';
   title: string;
   description: string;
   status: string;
@@ -20,16 +20,10 @@ export interface CognitiveNode {
   createdAt: string;
   updatedAt: string;
   metadata: Record<string, unknown>;
-  // goal
+  // witem
   horizon?: 'short' | 'medium' | 'long';
   successCriteria?: string[];
   priority?: 'critical' | 'high' | 'medium' | 'low';
-  // exploration
-  hypothesis?: string;
-  approach?: string;
-  findings?: string[];
-  conclusion?: string | null;
-  outcome?: 'validated' | 'invalidated' | 'partial' | 'inconclusive' | null;
   // decision
   context?: string;
   rationale?: string;
@@ -78,17 +72,15 @@ export interface BlockersResponse {
 }
 
 export interface ProjectState {
-  activeGoals: CognitiveNode[];
-  activeExplorations: CognitiveNode[];
+  activeWitems: CognitiveNode[];
   recentDecisions: CognitiveNode[];
   openRisks: CognitiveNode[];
   criticalTechDebt: CognitiveNode[];
   requirements: CognitiveNode[];
   openRequirements: CognitiveNode[];
   statistics: {
-    totalGoals: number;
-    achievedGoals: number;
-    activeExplorations: number;
+    totalWitems: number;
+    achievedWitems: number;
     openRisks: number;
     techDebtItems: number;
     totalRequirements: number;

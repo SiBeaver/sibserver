@@ -85,7 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(project_id, timestamp)
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(project_id, event_type);
 CREATE INDEX IF NOT EXISTS idx_events_node_id ON events(project_id, node_id);
 
--- pgvector for semantic search
+-- embedding 列保留待专项（退役向量搜索后代码无引用，删列需 DDL 迁移）
 CREATE EXTENSION IF NOT EXISTS vector;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS embedding vector(1024);
 CREATE INDEX IF NOT EXISTS idx_nodes_embedding

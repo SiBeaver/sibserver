@@ -3,7 +3,7 @@ import { createTestDb } from './helpers/test-db.js';
 import { NodeStore, EdgeStore, EventStore } from '../src/storage/stores.js';
 import type { Sql } from '../src/storage/db.js';
 import { ulid } from 'ulidx';
-import type { GoalNode, Edge, EventRecord } from '../src/index.js';
+import type { WitemNode, Edge, EventRecord } from '../src/index.js';
 
 const PROJECT_ID = 'default';
 
@@ -30,9 +30,9 @@ describe('Storage Layer', () => {
   describe('NodeStore', () => {
     it('应该能插入和读取 Goal 节点', async () => {
       const now = new Date().toISOString();
-      const goal: GoalNode = {
+      const witem: WitemNode = {
         id: ulid(),
-        type: 'goal',
+        type: 'witem',
         title: '完成 si-beaver MVP',
         description: '构建 AI 原生项目认知平台的最小可用版本',
         status: 'active',
@@ -45,41 +45,43 @@ describe('Storage Layer', () => {
         priority: 'high',
       };
 
-      await nodes.insert(goal);
-      const retrieved = await nodes.getById(goal.id);
+      await nodes.insert(witem);
+      const retrieved = await nodes.getById(witem.id);
 
       expect(retrieved).not.toBeNull();
       expect(retrieved!.title).toBe('完成 si-beaver MVP');
-      expect(retrieved!.type).toBe('goal');
-      expect((retrieved as GoalNode).horizon).toBe('medium');
-      expect((retrieved as GoalNode).success_criteria).toEqual(['MCP 服务器可连接', 'AI 工具可读写图谱']);
+      expect(retrieved!.type).toBe('witem');
+      expect((retrieved as WitemNode).horizon).toBe('medium');
+      expect((retrieved as WitemNode).success_criteria).toEqual(['MCP 服务器可连接', 'AI 工具可读写图谱']);
     });
 
     it('应该支持按类型查询', async () => {
       const now = new Date().toISOString();
       await nodes.insert({
-        id: ulid(), type: 'goal', title: 'Goal 1', description: '', status: 'active',
+        id: ulid(), type: 'witem', title: 'Witem 1', description: '', status: 'active',
         tags: [], created_at: now, updated_at: now, metadata: {},
         horizon: 'short', success_criteria: [], priority: 'medium',
-      } as GoalNode);
+      } as WitemNode);
       await nodes.insert({
-        id: ulid(), type: 'exploration', title: 'Exploration 1', description: '', status: 'active',
+        id: ulid(), type: 'knowledge', title: 'Knowledge 1', description: '', status: 'tentative',
         tags: [], created_at: now, updated_at: now, metadata: {},
-        hypothesis: '', approach: '', findings: [], conclusion: null, outcome: null,
+        domain: 'test', confidence: 'medium', source: 's', scope: 'project',
+        valid_until: null, content: '', parent_id: null, pinned: false, sort_order: 0,
       } as any);
 
-      const goals = await nodes.getByType('goal');
+      const goals = await nodes.getByType('witem');
       expect(goals).toHaveLength(1);
-      expect(goals[0].title).toBe('Goal 1');
+      expect(goals[0].title).toBe('Witem 1');
     });
 
     it('应该支持全文搜索', async () => {
       const now = new Date().toISOString();
       await nodes.insert({
-        id: ulid(), type: 'exploration', title: '研究 WebSocket 重连机制',
+        id: ulid(), type: 'knowledge', title: '研究 WebSocket 重连机制',
         description: '探索 actor model 在 WebSocket 场景的应用',
-        status: 'active', tags: [], created_at: now, updated_at: now, metadata: {},
-        hypothesis: '', approach: '', findings: [], conclusion: null, outcome: null,
+        status: 'tentative', tags: [], created_at: now, updated_at: now, metadata: {},
+        domain: 'test', confidence: 'medium', source: 's', scope: 'project',
+        valid_until: null, content: '', parent_id: null, pinned: false, sort_order: 0,
       } as any);
 
       // SQLite FTS uses LIKE instead of tsvector, so we use a simpler matching test
@@ -93,38 +95,38 @@ describe('Storage Layer', () => {
   describe('EdgeStore', () => {
     it('应该能插入和查询边', async () => {
       const now = new Date().toISOString();
-      const goalId = ulid();
-      const explorationId = ulid();
+      const parentId = ulid();
+      const childId = ulid();
 
       await nodes.insert({
-        id: goalId, type: 'goal', title: 'Goal', description: '', status: 'active',
+        id: parentId, type: 'witem', title: 'Witem', description: '', status: 'active',
         tags: [], created_at: now, updated_at: now, metadata: {},
         horizon: 'short', success_criteria: [], priority: 'high',
-      } as GoalNode);
+      } as WitemNode);
       await nodes.insert({
-        id: explorationId, type: 'exploration', title: 'Exploration', description: '', status: 'active',
+        id: childId, type: 'witem', title: 'Child Witem', description: '', status: 'active',
         tags: [], created_at: now, updated_at: now, metadata: {},
-        hypothesis: '', approach: '', findings: [], conclusion: null, outcome: null,
-      } as any);
+        horizon: 'short', success_criteria: [], priority: 'medium',
+      } as WitemNode);
 
       const edge: Edge = {
         id: ulid(),
-        source_id: goalId,
-        target_id: explorationId,
-        relation: 'spawns',
+        source_id: parentId,
+        target_id: childId,
+        relation: 'decomposes_into',
         weight: null,
-        annotation: '目标衍生探索',
+        annotation: '工作项拆解',
         created_at: now,
       };
 
       await edges.insert(edge);
 
-      const fromGoal = await edges.getBySource(goalId);
-      expect(fromGoal).toHaveLength(1);
-      expect(fromGoal[0].relation).toBe('spawns');
+      const fromParent = await edges.getBySource(parentId);
+      expect(fromParent).toHaveLength(1);
+      expect(fromParent[0].relation).toBe('decomposes_into');
 
-      const toExploration = await edges.getByTarget(explorationId);
-      expect(toExploration).toHaveLength(1);
+      const toChild = await edges.getByTarget(childId);
+      expect(toChild).toHaveLength(1);
     });
   });
 
@@ -134,12 +136,12 @@ describe('Storage Layer', () => {
       const event: EventRecord = {
         id: ulid(),
         timestamp: now,
-        event_type: 'goal.defined',
+        event_type: 'witem.defined',
         actor: 'user',
-        operation: 'define_goal',
+        operation: 'define_witem',
         node_id: 'test-node-id',
-        node_type: 'goal',
-        payload: { title: '测试目标' },
+        node_type: 'witem',
+        payload: { title: '测试工作项' },
         diff: null,
         context: '初始化项目',
       };
@@ -148,8 +150,8 @@ describe('Storage Layer', () => {
 
       const recent = await events.getRecent(10);
       expect(recent).toHaveLength(1);
-      expect(recent[0].event_type).toBe('goal.defined');
-      expect(recent[0].payload).toEqual({ title: '测试目标' });
+      expect(recent[0].event_type).toBe('witem.defined');
+      expect(recent[0].payload).toEqual({ title: '测试工作项' });
 
       const byNode = await events.getByNode('test-node-id');
       expect(byNode).toHaveLength(1);

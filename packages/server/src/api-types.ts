@@ -15,7 +15,7 @@ import type { RelationType } from '@sibeaver/core';
 export type { EventType, RelationType };
 
 export type NodeType =
-  | 'goal' | 'task' | 'exploration' | 'decision'
+  | 'witem' | 'decision'
   | 'risk' | 'tech_debt' | 'artifact' | 'knowledge' | 'requirement';
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low';
@@ -40,17 +40,11 @@ export interface ApiNode {
   status: string;
 }
 
-export interface ApiGoalNode extends ApiNode {
-  type: 'goal';
+export interface ApiWitemNode extends ApiNode {
+  type: 'witem';
   status: 'active' | 'achieved' | 'abandoned' | 'deferred';
   horizon: 'short' | 'medium' | 'long';
   successCriteria: string[];
-  priority: Priority;
-}
-
-export interface ApiTaskNode extends ApiNode {
-  type: 'task';
-  status: 'open' | 'in_progress' | 'done' | 'cancelled';
   priority: Priority;
 }
 
@@ -86,8 +80,7 @@ export interface ApiKnowledgeNode extends ApiNode {
 }
 
 export type ApiCognitiveNode =
-  | ApiGoalNode
-  | ApiTaskNode
+  | ApiWitemNode
   | ApiRequirementNode
   | ApiKnowledgeNode
   | ApiNode;
@@ -137,9 +130,8 @@ export interface ApiNodeContext {
 }
 
 export interface ApiProjectState {
-  goals: ApiNode[];
+  witems: ApiNode[];
   requirements: ApiRequirementNode[];
-  explorations: ApiNode[];
   decisions: ApiNode[];
   risks: ApiNode[];
   techDebts: ApiNode[];

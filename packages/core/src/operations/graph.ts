@@ -100,11 +100,8 @@ export async function deleteNode(ctx: OperationContext, input: DeleteNodeInput) 
 // ============================================================
 
 export async function getProjectState(ctx: OperationContext) {
-  const goals = await ctx.nodes.getByType('goal');
-  const active_goals = goals.filter(g => g.status === 'active');
-  const tasks = await ctx.nodes.getByType('task');
-  const open_tasks = tasks.filter(t => !['done', 'cancelled'].includes(t.status));
-  const explorations = await ctx.nodes.getByTypeAndStatus('exploration', 'active');
+  const witems = await ctx.nodes.getByType('witem');
+  const active_witems = witems.filter(g => g.status === 'active');
   const recent_decisions = (await ctx.nodes.getByType('decision'))
     .filter(d => !['superseded', 'deprecated'].includes(d.status))
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -115,20 +112,15 @@ export async function getProjectState(ctx: OperationContext) {
   const open_requirements = requirements.filter(r => !['satisfied', 'deprecated'].includes(r.status));
 
   return {
-    active_goals,
-    open_tasks,
-    active_explorations: explorations,
+    active_witems,
     recent_decisions,
     open_risks,
     critical_tech_debt: tech_debt.filter(td => ['high', 'critical'].includes((td as any).severity)),
     requirements,
     open_requirements,
     statistics: {
-      total_goals: goals.length,
-      achieved_goals: goals.filter(g => g.status === 'achieved').length,
-      total_tasks: tasks.length,
-      done_tasks: tasks.filter(t => t.status === 'done').length,
-      active_explorations: explorations.length,
+      total_witems: witems.length,
+      achieved_witems: witems.filter(g => g.status === 'achieved').length,
       open_risks: open_risks.length,
       tech_debt_items: tech_debt.length,
       total_requirements: requirements.length,

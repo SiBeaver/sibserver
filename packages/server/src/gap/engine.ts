@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ulid } from 'ulidx';
 import type { OperationContext } from '@sibeaver/core';
-import type { RequirementNode, GoalNode } from '@sibeaver/core';
+import type { RequirementNode, WitemNode } from '@sibeaver/core';
 import type { EvidenceInput, PatternResult } from '@sibeaver/core';
 import { evaluateConstraint } from '../policies/constraint-evaluator.js';
 import type {
@@ -16,7 +16,7 @@ import type {
 } from '@sibeaver/core';
 
 // ============================================================
-// Gap 引擎 — 三方对账：BOM@commit（应然）/ 证据（实然）/ 在办 goal（标注）
+// Gap 引擎 — 三方对账：BOM@commit（应然）/ 证据（实然）/ 在办 witem（标注）
 //
 // 差距只能由对照计算自动发现，不可手动创建/关闭；
 // 差距消失的唯一路径是下轮对账时证据满足条件（豁免仅静默）。
@@ -47,7 +47,7 @@ function constraintKey(c: BomConstraint): string {
   return c.requirement_key ?? GLOBAL_KEY;
 }
 
-// ── 三源计算（纯函数部分 + sibs_query/goal 读图谱）─────────────
+// ── 三源计算（纯函数部分 + sibs_query/witem 读图谱）─────────────
 
 async function computeDesiredGaps(
   ctx: OperationContext,
@@ -197,9 +197,9 @@ async function computeDesiredGaps(
     }
   }
 
-  const goals = await ctx.nodes.getByTypeAndStatus('goal', 'active') as GoalNode[];
-  for (const goal of goals) {
-    const edges = await ctx.edges.getBySource(goal.id);
+  const witems = await ctx.nodes.getByTypeAndStatus('witem', 'active') as WitemNode[];
+  for (const witem of witems) {
+    const edges = await ctx.edges.getBySource(witem.id);
     for (const edge of edges.filter(e => e.relation === 'fulfills')) {
       const target = await ctx.nodes.getById(edge.target_id);
       if (!target || target.type !== 'requirement') continue;
@@ -208,11 +208,11 @@ async function computeDesiredGaps(
       gaps.push({
         requirement_key: key,
         kind: 'staleness',
-        title: `在办 goal「${goal.title}」fulfills 的需求已不在 BOM 中`,
-        detail: `goal ${goal.id} → requirement ${target.id} → ${key}`,
+        title: `在办 witem「${witem.title}」fulfills 的需求已不在 BOM 中`,
+        detail: `witem ${witem.id} → requirement ${target.id} → ${key}`,
         severity: 'medium',
-        source_ref: goal.id,
-        condition_fingerprint: fingerprint({ t: 'stale-goal', id: goal.id, key }),
+        source_ref: witem.id,
+        condition_fingerprint: fingerprint({ t: 'stale-witem', id: witem.id, key }),
         evidence_fingerprint: null,
       });
     }
@@ -530,14 +530,14 @@ async function inProgressGoalsByKey(
 ): Promise<Map<string, { id: string; title: string }>> {
   const map = new Map<string, { id: string; title: string }>();
   if (!bom) return map;
-  const goals = await ctx.nodes.getByTypeAndStatus('goal', 'active') as GoalNode[];
-  for (const goal of goals) {
-    const edges = await ctx.edges.getBySource(goal.id);
+  const witems = await ctx.nodes.getByTypeAndStatus('witem', 'active') as WitemNode[];
+  for (const witem of witems) {
+    const edges = await ctx.edges.getBySource(witem.id);
     for (const edge of edges.filter(e => e.relation === 'fulfills')) {
       const target = await ctx.nodes.getById(edge.target_id);
       if (!target || target.type !== 'requirement') continue;
       const key = (target as RequirementNode).source_detail;
-      if (key && !map.has(key)) map.set(key, { id: goal.id, title: goal.title });
+      if (key && !map.has(key)) map.set(key, { id: witem.id, title: witem.title });
     }
   }
   return map;

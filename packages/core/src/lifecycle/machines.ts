@@ -1,4 +1,4 @@
-import type { GoalStatus, ExplorationStatus, DecisionStatus, RiskStatus, TechDebtStatus, KnowledgeStatus, RequirementStatus, TaskStatus } from '../nodes/types.js';
+import type { WitemStatus, DecisionStatus, RiskStatus, TechDebtStatus, KnowledgeStatus, RequirementStatus } from '../nodes/types.js';
 
 // ============================================================
 // 生命周期状态转换规则
@@ -6,24 +6,15 @@ import type { GoalStatus, ExplorationStatus, DecisionStatus, RiskStatus, TechDeb
 
 type TransitionMap<S extends string> = Partial<Record<S, S[]>>;
 
-export const GOAL_TRANSITIONS: TransitionMap<GoalStatus> = {
+export const WITEM_TRANSITIONS: TransitionMap<WitemStatus> = {
   active: ['achieved', 'abandoned', 'deferred'],
   deferred: ['active', 'abandoned'],
 };
 
-export const TASK_TRANSITIONS: TransitionMap<TaskStatus> = {
-  open: ['in_progress', 'cancelled'],
-  in_progress: ['done', 'open', 'cancelled'],
-};
-
-export const EXPLORATION_TRANSITIONS: TransitionMap<ExplorationStatus> = {
-  proposed: ['active'],
-  active: ['concluded', 'abandoned'],
-};
-
 export const DECISION_TRANSITIONS: TransitionMap<DecisionStatus> = {
-  proposed: ['accepted'],
-  accepted: ['superseded', 'deprecated'],
+  proposed: ['accepted', 'failed'],
+  accepted: ['superseded', 'deprecated', 'failed'],
+  superseded: ['failed'],
 };
 
 export const RISK_TRANSITIONS: TransitionMap<RiskStatus> = {

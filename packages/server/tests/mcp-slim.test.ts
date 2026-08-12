@@ -31,11 +31,16 @@ describe('MCP 响应瘦身', () => {
   });
 
   it('record_decision 只回执确认字段（无 context/rationale/consequences 全量）', async () => {
+    const anchor = await handlers['define_witem']({
+      title: '锚', horizon: 'short', priority: 'medium',
+    });
+    const anchorId = JSON.parse(anchor.content[0].text).witem.id;
     const res = await handlers['record_decision']({
       title: 't', context: 'ctx', rationale: 'rat',
       consequences: ['c1', 'c2'],
       alternatives_considered: [{ option: 'a', reason_rejected: 'r' }],
       risks_created: [{ title: 'r1', description: 'd', likelihood: 'medium', impact: 'high' }],
+      related_witems: [anchorId],
     }) as { content: Array<{ text: string }> };
     const data = JSON.parse(res.content[0].text);
     expect(data.decision).toEqual({
@@ -64,12 +69,12 @@ describe('MCP 响应瘦身', () => {
 
   it('slimEnvelope 保留标量，投影节点/边/事件（camelCase 输出）', () => {
     const out = slimEnvelope({
-      goal: { id: 'g1', type: 'goal', title: 'G', status: 'active', success_criteria: ['x'] },
+      goal: { id: 'g1', type: 'witem', title: 'G', status: 'active', success_criteria: ['x'] },
       edges_created: [{ id: 'e1', source_id: 'g1', target_id: 'g2', relation: 'blocks' }],
       event: { id: 'ev1', event_type: 'goal.created', payload: { big: 'data' } },
     } as any);
     expect(out).toEqual({
-      goal: { id: 'g1', type: 'goal', title: 'G', status: 'active' },
+      goal: { id: 'g1', type: 'witem', title: 'G', status: 'active' },
       edges_created: [{ id: 'e1', sourceId: 'g1', targetId: 'g2', relation: 'blocks' }],
       event: { id: 'ev1', eventType: 'goal.created' },
     });
@@ -92,40 +97,37 @@ describe('MCP 响应瘦身', () => {
   });
 
   it('slimSearchResult 处理裸数组', () => {
-    const out = slimSearchResult([{ id: 'a', type: 'task', title: 'T', description: '短' }] as any);
-    expect(out[0]).toEqual({ id: 'a', type: 'task', title: 'T', description: '短' });
+    const out = slimSearchResult([{ id: 'a', type: 'witem', title: 'T', description: '短' }] as any);
+    expect(out[0]).toEqual({ id: 'a', type: 'witem', title: 'T', description: '短' });
   });
 
   it('slimBatchResult 保留 summary，瘦身每条 result 信封', () => {
     const out = slimBatchResult({
       summary: { total: 1, succeeded: 1, failed: 0 },
-      results: [{ op: 'create_task', ok: true, result: { task: { id: 't1', type: 'task', title: 'T', description: 'x' }, event: { id: 'e1', event_type: 'task.created' } } }],
+      results: [{ op: 'define_witem', ok: true, result: { witem: { id: 't1', type: 'witem', title: 'T', description: 'x' }, event: { id: 'e1', event_type: 'witem.defined' } } }],
     } as any);
     expect(out.summary).toEqual({ total: 1, succeeded: 1, failed: 0 });
-    expect(out.results[0].result.task).toEqual({ id: 't1', type: 'task', title: 'T' });
-    expect(out.results[0].op).toBe('create_task');
+    expect(out.results[0].result.witem).toEqual({ id: 't1', type: 'witem', title: 'T' });
+    expect(out.results[0].op).toBe('define_witem');
   });
 
-  it('slimProjectStateResult 截断 description、去 content、findings 只留 3 条、去重复 requirements', () => {
+  it('slimProjectStateResult 截断 description、去 content、去重复 requirements', () => {
     const long = '字'.repeat(500);
     const res = slimProjectStateResult({
       content: [{ type: 'text', text: JSON.stringify({
-        active_goals: [{ id: 'g1', type: 'goal', title: 'G', status: 'active', description: long, content: 'x'.repeat(1000), success_criteria: ['a', 'b'] }],
-        active_explorations: [{ id: 'e1', type: 'exploration', title: 'E', status: 'active', description: 'd', hypothesis: long, findings: Array.from({ length: 5 }, (_, i) => `f${i}${'字'.repeat(300)}`) }],
+        active_witems: [{ id: 'g1', type: 'witem', title: 'G', status: 'active', description: long, content: 'x'.repeat(1000), success_criteria: ['a', 'b'] }],
         requirements: [{ id: 'r1', type: 'requirement', title: 'R', status: 'accepted', description: 'req' }],
         open_requirements: [{ id: 'r1', type: 'requirement', title: 'R', status: 'accepted', description: 'req' }],
         statistics: { total_requirements: 1 },
       }) }],
     } as any);
     const data = JSON.parse(res.content[0].text);
-    expect(data.activeGoals[0]).toEqual({
-      id: 'g1', type: 'goal', title: 'G', status: 'active',
+    expect(data.activeWitems[0]).toEqual({
+      id: 'g1', type: 'witem', title: 'G', status: 'active',
       description: expect.stringMatching(/^字{200}…$/),
     });
-    expect(data.activeGoals[0]).not.toHaveProperty('content');
-    expect(data.activeGoals[0]).not.toHaveProperty('successCriteria');
-    expect(data.activeExplorations[0].findings).toHaveLength(3);
-    expect(data.activeExplorations[0].findings[0]).toMatch(/^f0字{198}…$/);
+    expect(data.activeWitems[0]).not.toHaveProperty('content');
+    expect(data.activeWitems[0]).not.toHaveProperty('successCriteria');
     expect(data).not.toHaveProperty('requirements');
     expect(data.openRequirements).toHaveLength(1);
     expect(data.statistics).toEqual({ totalRequirements: 1 });

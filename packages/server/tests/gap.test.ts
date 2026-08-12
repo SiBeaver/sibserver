@@ -119,7 +119,7 @@ describe('Gap 引擎三方对账', () => {
       priority: 'medium', source: 'specs-md', source_detail: 'dom/ghost', acceptance: null,
     });
     await ctx.nodes.insert({
-      id: 'goal-1', type: 'goal', title: '在办单', description: '', status: 'active',
+      id: 'goal-1', type: 'witem', title: '在办单', description: '', status: 'active',
       tags: [], created_at: NOW, updated_at: NOW, metadata: {},
       horizon: 'short', success_criteria: [], priority: 'high',
     });
@@ -169,7 +169,7 @@ describe('Gap 引擎三方对账', () => {
       priority: 'high', source: 'specs-md', source_detail: 'dom/req-a', acceptance: null,
     });
     await ctx.nodes.insert({
-      id: 'goal-a', type: 'goal', title: '弥合A', description: '', status: 'active',
+      id: 'goal-a', type: 'witem', title: '弥合A', description: '', status: 'active',
       tags: [], created_at: NOW, updated_at: NOW, metadata: {},
       horizon: 'short', success_criteria: [], priority: 'high',
     });

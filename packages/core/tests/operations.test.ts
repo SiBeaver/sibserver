@@ -3,12 +3,10 @@ import { createTestDb } from './helpers/test-db.js';
 import type { Sql } from '../src/storage/db.js';
 import { OperationContext } from '../src/operations/context.js';
 import {
-  defineGoal, decomposeGoal, updateGoalStatus,
-  beginExploration, recordExplorationFinding, concludeExploration, abandonExploration,
-  recordDecision,
+  defineWitem, decomposeWitem, updateWitemStatus,
+  recordDecision, updateDecisionStatus,
   identifyRisk, updateRisk, registerTechDebt,
   recordKnowledge,
-  createTask,
   linkNodes, getProjectState, getNodeContext,
   defineRequirement, updateRequirementStatus,
 } from '../src/operations/index.js';
@@ -33,9 +31,9 @@ describe('Operations Layer', () => {
   // Goal Operations
   // ============================================================
 
-  describe('defineGoal', () => {
+  describe('defineWitem', () => {
     it('应该创建目标并返回事件', async () => {
-      const result = await defineGoal(ctx, {
+      const result = await defineWitem(ctx, {
         title: '测试目标',
         horizon: 'short',
         priority: 'high',
@@ -43,149 +41,66 @@ describe('Operations Layer', () => {
         tags: ['test'],
       });
 
-      expect(result.goal.title).toBe('测试目标');
-      expect(result.goal.status).toBe('active');
-      expect(result.goal.horizon).toBe('short');
-      expect(result.goal.priority).toBe('high');
-      expect(result.goal.success_criteria).toEqual(['标准1']);
-      expect(result.event.event_type).toBe('goal.defined');
+      expect(result.witem.title).toBe('测试目标');
+      expect(result.witem.status).toBe('active');
+      expect(result.witem.horizon).toBe('short');
+      expect(result.witem.priority).toBe('high');
+      expect(result.witem.success_criteria).toEqual(['标准1']);
+      expect(result.event.event_type).toBe('witem.defined');
       expect(result.edges_created).toHaveLength(0);
     });
 
     it('应该创建父子关系', async () => {
-      const parent = await defineGoal(ctx, { title: '父目标', horizon: 'long', priority: 'high' });
-      const child = await defineGoal(ctx, {
+      const parent = await defineWitem(ctx, { title: '父目标', horizon: 'long', priority: 'high' });
+      const child = await defineWitem(ctx, {
         title: '子目标', horizon: 'short', priority: 'medium',
-        parent_goal: parent.goal.id,
+        parent_witem: parent.witem.id,
       });
 
       expect(child.edges_created).toHaveLength(1);
       expect(child.edges_created[0].relation).toBe('decomposes_into');
-      expect(child.edges_created[0].source_id).toBe(parent.goal.id);
+      expect(child.edges_created[0].source_id).toBe(parent.witem.id);
     });
   });
 
-  describe('decomposeGoal', () => {
-    it('应该分解目标为子目标、任务和探索', async () => {
-      const goal = await defineGoal(ctx, { title: '大目标', horizon: 'long', priority: 'high' });
-      const result = await decomposeGoal(ctx, {
-        goal_id: goal.goal.id,
-        sub_goals: [{ title: '子目标A', horizon: 'medium' }],
-        explorations_needed: [{ topic: '探索X', reason: '需要调研' }],
+  describe('decomposeWitem', () => {
+    it('应该分解目标为子目标', async () => {
+      const goal = await defineWitem(ctx, { title: '大目标', horizon: 'long', priority: 'high' });
+      const result = await decomposeWitem(ctx, {
+        witem_id: goal.witem.id,
+        sub_witems: [{ title: '子目标A', horizon: 'medium' }],
       });
 
-      expect(result.sub_goals_created).toHaveLength(1);
-      expect(result.explorations_created).toHaveLength(1);
-      expect(result.edges_created).toHaveLength(2);
-      expect(result.event.event_type).toBe('goal.decomposed');
+      expect(result.sub_witems_created).toHaveLength(1);
+      expect(result.edges_created).toHaveLength(1);
+      expect(result.event.event_type).toBe('witem.decomposed');
     });
 
-    it('应该拒绝不存在的目标', async () => {
-      await expect(decomposeGoal(ctx, { goal_id: 'nonexistent' }))
-        .rejects.toThrow('目标不存在：nonexistent');
+    it('应该拒绝不存在的工作项', async () => {
+      await expect(decomposeWitem(ctx, { witem_id: 'nonexistent' }))
+        .rejects.toThrow('工作项不存在：nonexistent');
     });
   });
 
-  describe('updateGoalStatus', () => {
+  describe('updateWitemStatus', () => {
     it('应该更新目标状态', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'medium' });
-      const result = await updateGoalStatus(ctx, {
-        goal_id: goal.goal.id,
+      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'medium' });
+      const result = await updateWitemStatus(ctx, {
+        witem_id: goal.witem.id,
         new_status: 'achieved',
         reason: '已完成',
       });
 
-      expect(result.goal.status).toBe('achieved');
-      expect(result.event.event_type).toBe('goal.status_changed');
+      expect(result.witem.status).toBe('achieved');
+      expect(result.event.event_type).toBe('witem.status_changed');
     });
 
     it('应该拒绝无效的状态转换', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'medium' });
-      await updateGoalStatus(ctx, { goal_id: goal.goal.id, new_status: 'achieved', reason: '完成' });
-      await expect(updateGoalStatus(ctx, {
-        goal_id: goal.goal.id, new_status: 'active', reason: '回退',
+      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'medium' });
+      await updateWitemStatus(ctx, { witem_id: goal.witem.id, new_status: 'achieved', reason: '完成' });
+      await expect(updateWitemStatus(ctx, {
+        witem_id: goal.witem.id, new_status: 'active', reason: '回退',
       })).rejects.toThrow('无效状态迁移：achieved → active');
-    });
-  });
-
-  // ============================================================
-  // Exploration Operations
-  // ============================================================
-
-  describe('beginExploration', () => {
-    it('应该创建探索并关联目标', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'high' });
-      const result = await beginExploration(ctx, {
-        topic: '研究问题',
-        reason: '需要了解',
-        related_goals: [goal.goal.id],
-      });
-
-      expect(result.exploration.title).toBe('研究问题');
-      expect(result.exploration.status).toBe('active');
-      expect(result.edges_created).toHaveLength(1);
-      expect(result.edges_created[0].relation).toBe('spawns');
-    });
-  });
-
-  describe('recordExplorationFinding', () => {
-    it('应该记录发现并追加到 findings', async () => {
-      const exp = await beginExploration(ctx, { topic: '探索', reason: '原因' });
-      const result = await recordExplorationFinding(ctx, {
-        exploration_id: exp.exploration.id,
-        finding: '发现了重要信息',
-        significance: 'major',
-      });
-
-      expect(result.exploration.findings).toContain('发现了重要信息');
-      expect(result.event.event_type).toBe('exploration.finding_recorded');
-    });
-
-    it('应该拒绝非活跃探索', async () => {
-      const exp = await beginExploration(ctx, { topic: '探索', reason: '原因' });
-      await concludeExploration(ctx, {
-        exploration_id: exp.exploration.id,
-        conclusion: '结论',
-        outcome: 'validated',
-      });
-      await expect(recordExplorationFinding(ctx, {
-        exploration_id: exp.exploration.id,
-        finding: '迟到的发现',
-        significance: 'minor',
-      })).rejects.toThrow('探索不在活跃状态：concluded');
-    });
-  });
-
-  describe('concludeExploration', () => {
-    it('应该结论化探索并创建衍生节点', async () => {
-      const exp = await beginExploration(ctx, { topic: '探索', reason: '原因' });
-      const result = await concludeExploration(ctx, {
-        exploration_id: exp.exploration.id,
-        conclusion: '结论',
-        outcome: 'validated',
-        decisions: [{ title: '决策A', rationale: '原因' }],
-        knowledge: [{ title: '知识B', domain: 'test', description: '内容' }],
-      });
-
-      expect(result.exploration.status).toBe('concluded');
-      expect(result.decisions_created).toHaveLength(1);
-      expect(result.knowledge_created).toHaveLength(1);
-      expect(result.edges_created.length).toBeGreaterThanOrEqual(2);
-    });
-  });
-
-  describe('abandonExploration', () => {
-    it('应该放弃探索并可选记录学习', async () => {
-      const exp = await beginExploration(ctx, { topic: '探索', reason: '原因' });
-      const result = await abandonExploration(ctx, {
-        exploration_id: exp.exploration.id,
-        reason: '方向错误',
-        learnings: '学到了不该走这条路',
-      });
-
-      expect(result.exploration.status).toBe('abandoned');
-      expect(result.knowledge_created).not.toBeNull();
-      expect(result.knowledge_created!.title).toContain('从失败探索中学到');
     });
   });
 
@@ -195,6 +110,7 @@ describe('Operations Layer', () => {
 
   describe('recordDecision', () => {
     it('应该记录决策并创建关联风险和技术债', async () => {
+      const anchor = await defineWitem(ctx, { title: '锚', horizon: 'short', priority: 'medium' });
       const result = await recordDecision(ctx, {
         title: '选择 TypeScript',
         context: '需要选语言',
@@ -212,6 +128,7 @@ describe('Operations Layer', () => {
           affected_area: '全局',
           cost_of_delay: '后续难维护',
         }],
+        related_witems: [anchor.witem.id],
       });
 
       expect(result.decision.title).toBe('选择 TypeScript');
@@ -221,7 +138,8 @@ describe('Operations Layer', () => {
     });
 
     it('应该支持取代旧决策', async () => {
-      const old = await recordDecision(ctx, { title: '旧决策', context: 'ctx', rationale: 'r' });
+      const anchor = await defineWitem(ctx, { title: '锚', horizon: 'short', priority: 'medium' });
+      const old = await recordDecision(ctx, { title: '旧决策', context: 'ctx', rationale: 'r', related_witems: [anchor.witem.id] });
       const result = await recordDecision(ctx, {
         title: '新决策', context: 'ctx', rationale: 'r',
         supersedes: old.decision.id,
@@ -233,19 +151,44 @@ describe('Operations Layer', () => {
     });
   });
 
+  describe('updateDecisionStatus', () => {
+    it('应该支持兑现度回写：撤销/证伪置 failed', async () => {
+      const anchor = await defineWitem(ctx, { title: '锚', horizon: 'short', priority: 'medium' });
+      const decision = await recordDecision(ctx, { title: '决策', context: 'ctx', rationale: 'r', related_witems: [anchor.witem.id] });
+      const result = await updateDecisionStatus(ctx, {
+        decision_id: decision.decision.id,
+        new_status: 'failed',
+        reason: '预期被现实证伪',
+      });
+
+      expect(result.decision.status).toBe('failed');
+      expect(result.event.event_type).toBe('decision.superseded');
+      expect(result.event.diff).toEqual([{ field: 'status', old_value: 'accepted', new_value: 'failed' }]);
+    });
+
+    it('应该拒绝无效状态迁移', async () => {
+      const anchor = await defineWitem(ctx, { title: '锚', horizon: 'short', priority: 'medium' });
+      const decision = await recordDecision(ctx, { title: '决策', context: 'ctx', rationale: 'r', related_witems: [anchor.witem.id] });
+      await updateDecisionStatus(ctx, { decision_id: decision.decision.id, new_status: 'failed', reason: '证伪' });
+      await expect(updateDecisionStatus(ctx, {
+        decision_id: decision.decision.id, new_status: 'accepted', reason: '复活',
+      })).rejects.toThrow('无效状态迁移：failed → accepted');
+    });
+  });
+
   // ============================================================
   // Risk & Tech Debt Operations
   // ============================================================
 
   describe('identifyRisk', () => {
     it('应该识别风险并关联目标', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
       const result = await identifyRisk(ctx, {
         title: '风险',
         description: '可能出问题',
         likelihood: 'medium',
         impact: 'high',
-        affected_goals: [goal.goal.id],
+        affected_witems: [goal.witem.id],
       });
 
       expect(result.risk.status).toBe('identified');
@@ -326,11 +269,11 @@ describe('Operations Layer', () => {
 
   describe('linkNodes', () => {
     it('应该在合法节点间创建边', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'high' });
-      const task = await createTask(ctx, { title: '任务' });
+      const parent = await defineWitem(ctx, { title: '父', horizon: 'short', priority: 'high' });
+      const child = await defineWitem(ctx, { title: '子', horizon: 'short', priority: 'medium' });
       const result = await linkNodes(ctx, {
-        source_id: goal.goal.id,
-        target_id: task.task.id,
+        source_id: parent.witem.id,
+        target_id: child.witem.id,
         relation: 'decomposes_into',
       });
 
@@ -338,39 +281,37 @@ describe('Operations Layer', () => {
     });
 
     it('应该拒绝非法关系', async () => {
-      const task1 = await createTask(ctx, { title: '任务1' });
-      const task2 = await createTask(ctx, { title: '任务2' });
+      const w1 = await defineWitem(ctx, { title: '工作项1', horizon: 'short', priority: 'medium' });
+      const w2 = await defineWitem(ctx, { title: '工作项2', horizon: 'short', priority: 'medium' });
       await expect(linkNodes(ctx, {
-        source_id: task1.task.id,
-        target_id: task2.task.id,
-        relation: 'decomposes_into',
-      })).rejects.toThrow('无效关系「decomposes_into」：task → task');
+        source_id: w1.witem.id,
+        target_id: w2.witem.id,
+        relation: 'fulfills',
+      })).rejects.toThrow('无效关系「fulfills」：witem → witem');
     });
   });
 
   describe('getProjectState', () => {
     it('应该返回项目状态快照', async () => {
-      await defineGoal(ctx, { title: '活跃目标', horizon: 'short', priority: 'high' });
-      await beginExploration(ctx, { topic: '活跃探索', reason: '原因' });
+      await defineWitem(ctx, { title: '活跃工作项', horizon: 'short', priority: 'high' });
       await identifyRisk(ctx, {
         title: '风险', description: '描述', likelihood: 'high', impact: 'critical',
       });
 
       const state = await getProjectState(ctx);
-      expect(state.active_goals).toHaveLength(1);
-      expect(state.active_explorations).toHaveLength(1);
+      expect(state.active_witems).toHaveLength(1);
       expect(state.open_risks).toHaveLength(1);
-      expect(state.statistics.total_goals).toBe(1);
+      expect(state.statistics.total_witems).toBe(1);
     });
   });
 
   describe('getNodeContext', () => {
     it('应该返回节点及其关联信息', async () => {
-      const goal = await defineGoal(ctx, { title: '目标', horizon: 'short', priority: 'high' });
-      await createTask(ctx, { title: '任务', parent_goal: goal.goal.id });
+      const parent = await defineWitem(ctx, { title: '父', horizon: 'short', priority: 'high' });
+      const child = await defineWitem(ctx, { title: '子', horizon: 'short', priority: 'medium', parent_witem: parent.witem.id });
 
-      const context = await getNodeContext(ctx, goal.goal.id);
-      expect(context.node.id).toBe(goal.goal.id);
+      const context = await getNodeContext(ctx, parent.witem.id);
+      expect(context.node.id).toBe(parent.witem.id);
       expect(context.edges).toHaveLength(1);
       expect(context.neighbors).toHaveLength(1);
       expect(context.events.length).toBeGreaterThan(0);

@@ -16,7 +16,7 @@ export interface IdentifyRiskInput {
   likelihood: 'low' | 'medium' | 'high';
   impact: 'low' | 'medium' | 'high' | 'critical';
   trigger_conditions?: string[];
-  affected_goals?: string[];
+  affected_witems?: string[];
   mitigation_strategy?: string;
   tags?: string[];
 }
@@ -43,9 +43,9 @@ export async function identifyRisk(ctx: OperationContext, input: IdentifyRiskInp
     await tx.nodes.insert(risk);
     const edges_created: Edge[] = [];
 
-    for (const goalId of input.affected_goals ?? []) {
+    for (const witemId of input.affected_witems ?? []) {
       const edge: Edge = {
-        id: ulid(), source_id: risk.id, target_id: goalId,
+        id: ulid(), source_id: risk.id, target_id: witemId,
         relation: 'blocks', weight: null, annotation: null, created_at: now,
       };
       await tx.edges.insert(edge);

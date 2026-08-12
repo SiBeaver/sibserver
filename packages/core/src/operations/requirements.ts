@@ -14,7 +14,7 @@ export interface DefineRequirementInput {
   priority?: 'critical' | 'high' | 'medium' | 'low';
   source: string;
   source_detail?: string;
-  parent_goal?: string;
+  parent_witem?: string;
   tags?: string[];
   acceptance?: Acceptance;
   status?: RequirementStatus;
@@ -22,10 +22,10 @@ export interface DefineRequirementInput {
 
 export async function defineRequirement(ctx: OperationContext, input: DefineRequirementInput) {
   return ctx.withTx(async (tx) => {
-    if (input.parent_goal) {
-      const goal = await tx.nodes.getById(input.parent_goal);
-      if (!goal || goal.type !== 'goal') {
-        throw new Error(`父目标不存在：${input.parent_goal}`);
+    if (input.parent_witem) {
+      const witem = await tx.nodes.getById(input.parent_witem);
+      if (!witem || witem.type !== 'witem') {
+        throw new Error(`父工作项不存在：${input.parent_witem}`);
       }
     }
 
@@ -49,9 +49,9 @@ export async function defineRequirement(ctx: OperationContext, input: DefineRequ
     await tx.nodes.insert(requirement);
     const edges_created: Edge[] = [];
 
-    if (input.parent_goal) {
+    if (input.parent_witem) {
       const edge: Edge = {
-        id: ulid(), source_id: requirement.id, target_id: input.parent_goal,
+        id: ulid(), source_id: requirement.id, target_id: input.parent_witem,
         relation: 'informs', weight: null, annotation: null, created_at: now,
       };
       await tx.edges.insert(edge);

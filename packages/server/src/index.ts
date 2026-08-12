@@ -10,9 +10,6 @@ export type { ProjectMeta, CreateProjectInput, UpdateProjectInput } from './proj
 export { createSiBeaverApp, operationHandlers, type SiBeaverApp } from './api/server.js';
 export { handleMcpRequest } from './mcp/http-server.js';
 
-// operations extensions — distill stays server-side (depends on llm-client)
-export { distillConversation, type DistillConversationInput, type DistillConversationResponse, type DistillProposal } from './operations/distill-conversation.js';
-
 // config
 export { config } from './config/index.js';
 
@@ -26,8 +23,7 @@ export type {
   ApiNodeContext,
   ApiProjectState,
   ApiCognitiveNode,
-  ApiGoalNode,
-  ApiTaskNode,
+  ApiWitemNode,
   ApiRequirementNode,
   ApiKnowledgeNode,
   ApiEdge,

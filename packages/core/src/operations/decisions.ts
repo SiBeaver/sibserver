@@ -2,6 +2,7 @@ import { ulid } from 'ulidx';
 import type { OperationContext } from './context.js';
 import type { DecisionNode } from '../nodes/types.js';
 import type { Edge } from '../edges/types.js';
+import { isValidTransition, DECISION_TRANSITIONS } from '../lifecycle/machines.js';
 
 // ============================================================
 // record_decision — 记录决策
@@ -18,8 +19,7 @@ export interface RecordDecisionInput {
     reason_rejected: string;
   }[];
   consequences?: string[];
-  related_goals?: string[];
-  related_explorations?: string[];
+  related_witems?: string[];
   supersedes?: string;
   risks_created?: {
     title: string;
@@ -39,6 +39,12 @@ export interface RecordDecisionInput {
 
 export async function recordDecision(ctx: OperationContext, input: RecordDecisionInput) {
   return ctx.withTx(async (tx) => {
+    // 统一图谱锚点必填：写入即锚定，从 ROOT 可达为结构存活判据
+    const hasAnchor = (input.related_witems?.length ?? 0) > 0 || !!input.supersedes;
+    if (!hasAnchor) {
+      throw new Error('决策必须关联工作项（related_witems）或取代旧决策（supersedes）——写入即锚定，悬空节点不被回收');
+    }
+
     const now = new Date().toISOString();
 
     const decision: DecisionNode = {
@@ -68,21 +74,11 @@ export async function recordDecision(ctx: OperationContext, input: RecordDecisio
     const risks_created: any[] = [];
     const tech_debt_created: any[] = [];
 
-    // 关联目标
-    for (const goalId of input.related_goals ?? []) {
+    // 关联工作项
+    for (const witemId of input.related_witems ?? []) {
       const edge: Edge = {
-        id: ulid(), source_id: decision.id, target_id: goalId,
+        id: ulid(), source_id: decision.id, target_id: witemId,
         relation: 'relates_to', weight: null, annotation: null, created_at: now,
-      };
-      await tx.edges.insert(edge);
-      edges_created.push(edge);
-    }
-
-    // 关联探索
-    for (const expId of input.related_explorations ?? []) {
-      const edge: Edge = {
-        id: ulid(), source_id: expId, target_id: decision.id,
-        relation: 'produces', weight: null, annotation: null, created_at: now,
       };
       await tx.edges.insert(edge);
       edges_created.push(edge);
@@ -163,5 +159,48 @@ export async function recordDecision(ctx: OperationContext, input: RecordDecisio
     });
 
     return { decision, risks_created, tech_debt_created, edges_created, event };
+  });
+}
+
+// ============================================================
+// update_decision_status — 决策生命周期兑现度回写
+// ============================================================
+
+export interface UpdateDecisionStatusInput {
+  decision_id: string;
+  new_status: 'accepted' | 'superseded' | 'deprecated' | 'failed';
+  reason: string;
+}
+
+export async function updateDecisionStatus(ctx: OperationContext, input: UpdateDecisionStatusInput) {
+  return ctx.withTx(async (tx) => {
+    const node = await tx.nodes.getById(input.decision_id);
+    if (!node || node.type !== 'decision') {
+      throw new Error(`决策不存在：${input.decision_id}`);
+    }
+
+    const oldStatus = node.status;
+    if (!isValidTransition(DECISION_TRANSITIONS, oldStatus as any, input.new_status)) {
+      throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
+    }
+
+    const updated: DecisionNode = {
+      ...node as DecisionNode,
+      status: input.new_status,
+      updated_at: new Date().toISOString(),
+    };
+    await tx.nodes.update(updated);
+
+    const event = await tx.events.emit({
+      event_type: 'decision.superseded',
+      operation: 'update_decision_status',
+      node_id: input.decision_id,
+      node_type: 'decision',
+      payload: { reason: input.reason },
+      diff: [{ field: 'status', old_value: oldStatus, new_value: input.new_status }],
+      context: input.reason,
+    });
+
+    return { decision: updated, event };
   });
 }

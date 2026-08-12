@@ -13,7 +13,7 @@ import type {
 export interface DirectSibsContext {
   getProjectState: () => Promise<ApiProjectState>;
   getNodeContext: (nodeId: string) => Promise<ApiNodeContext>;
-  defineGoal: (input: any) => Promise<any>;
+  defineWitem: (input: any) => Promise<any>;
   updateRequirementStatus: (input: any) => Promise<any>;
   linkNodes: (input: any) => Promise<any>;
   recordKnowledge: (input: any) => Promise<any>;
@@ -81,11 +81,11 @@ export const sibs = {
     return request<ApiNodeContext>(projectPath(`/nodes/${nodeId}`));
   },
 
-  defineGoal(input: {
+  defineWitem(input: {
     title: string; horizon: string; priority: string;
-    description?: string; parent_goal?: string;
+    description?: string; parent_witem?: string;
   }) {
-    if (directCtx) return directCtx.defineGoal(input);
+    if (directCtx) return directCtx.defineWitem(input);
     return operation("define-goal", input);
   },
 

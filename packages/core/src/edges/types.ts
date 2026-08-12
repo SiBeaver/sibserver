@@ -51,20 +51,20 @@ type RelationConstraint = {
 
 export const RELATION_CONSTRAINTS: Record<RelationType, RelationConstraint> = {
   decomposes_into: {
-    source: ['goal', 'requirement'],
-    target: ['goal', 'task', 'requirement'],
+    source: ['witem', 'requirement'],
+    target: ['witem', 'requirement'],
   },
   spawns: {
-    source: ['goal', 'risk'],
-    target: ['exploration'],
+    source: [],
+    target: [],
   },
   produces: {
-    source: ['exploration', 'task'],
+    source: [],
     target: ['decision', 'knowledge', 'artifact'],
   },
   informs: {
     source: ['knowledge', 'decision', 'requirement'],
-    target: ['decision', 'goal', 'task'],
+    target: ['decision', 'witem'],
   },
   creates: {
     source: ['decision'],
@@ -79,12 +79,12 @@ export const RELATION_CONSTRAINTS: Record<RelationType, RelationConstraint> = {
     target: ['tech_debt'],
   },
   blocks: {
-    source: ['risk', 'tech_debt', 'requirement', 'task'],
-    target: ['goal', 'task'],
+    source: ['risk', 'tech_debt', 'requirement'],
+    target: ['witem'],
   },
   relates_to: {
-    source: ['goal', 'task', 'exploration', 'decision', 'risk', 'tech_debt', 'artifact', 'knowledge', 'requirement'],
-    target: ['goal', 'task', 'exploration', 'decision', 'risk', 'tech_debt', 'artifact', 'knowledge', 'requirement'],
+    source: ['witem', 'decision', 'risk', 'tech_debt', 'artifact', 'knowledge', 'requirement'],
+    target: ['witem', 'decision', 'risk', 'tech_debt', 'artifact', 'knowledge', 'requirement'],
   },
   supersedes: {
     source: ['decision', 'knowledge', 'requirement'],
@@ -95,11 +95,11 @@ export const RELATION_CONSTRAINTS: Record<RelationType, RelationConstraint> = {
     target: ['artifact'],
   },
   derived_from: {
-    source: ['goal'],
-    target: ['exploration', 'knowledge'],
+    source: ['witem'],
+    target: ['knowledge'],
   },
   fulfills: {
-    source: ['goal'],
+    source: ['witem'],
     target: ['requirement'],
   },
   contradicts: {

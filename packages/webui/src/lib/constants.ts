@@ -3,9 +3,7 @@ import type { CognitiveNode } from './types';
 export type Tab = 'panoramic' | 'helm';
 
 export const NODE_TYPE_COLORS: Record<CognitiveNode['type'], string> = {
-  goal: 'blue',
-  task: 'green',
-  exploration: 'purple',
+  witem: 'blue',
   decision: 'gold',
   risk: 'red',
   tech_debt: 'orange',
@@ -15,9 +13,7 @@ export const NODE_TYPE_COLORS: Record<CognitiveNode['type'], string> = {
 };
 
 export const NODE_TYPE_LABELS: Record<CognitiveNode['type'], string> = {
-  goal: '目标',
-  task: '任务',
-  exploration: '探索',
+  witem: '工作项',
   decision: '决策',
   risk: '风险',
   tech_debt: '技术债',
@@ -39,7 +35,6 @@ export const STATUS_COLORS: Record<string, string> = {
   satisfied: 'success',
   done: 'success',
   cancelled: 'default',
-  concluded: 'blue',
   accepted: 'green',
   superseded: 'default',
   deprecated: 'default',
@@ -78,7 +73,6 @@ export const STATUS_LABELS: Record<string, string> = {
   satisfied: '已满足',
   done: '已完成',
   cancelled: '已取消',
-  concluded: '已结论',
   accepted: '已接受',
   superseded: '已取代',
   deprecated: '已弃用',

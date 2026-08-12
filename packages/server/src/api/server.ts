@@ -5,21 +5,18 @@ import { cors } from 'hono/cors';
 import { getRequestListener } from '@hono/node-server';
 import { handleMcpRequest } from '../mcp/http-server.js';
 import { chatCompletion, jsonCompletion, type ChatMessage } from '../llm-client.js';
-import { MAX_INPUT_CHARS } from '../operations/distill-conversation.js';
 import type { OperationContext, BatchOperationsInput } from '../index.js';
 import {
-  defineGoal, decomposeGoal, updateGoalStatus,
-  beginExploration, recordExplorationFinding, concludeExploration, abandonExploration,
-  recordDecision,
+  defineWitem, decomposeWitem, updateWitemStatus,
+  recordDecision, updateDecisionStatus,
   defineRequirement, updateRequirementStatus, updateRequirementAcceptance,
   identifyRisk, updateRisk, registerTechDebt,
   recordKnowledge, updateKnowledge, getKnowledgeTree, pinKnowledge, moveKnowledge,
   linkNodes, deleteNode, getProjectState, getNodeContext,
-  getRoadmap, goalProgress, decisionTrail, knowledgeMap,
+  getRoadmap, witemProgress, decisionTrail, knowledgeMap,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   getHelmSignals,
   batchOperations,
-  distillConversation,
 } from '../index.js';
 import { ProjectManager } from '../projects/index.js';
 import { setDirectSibs } from '../sibs-client.js';
@@ -37,14 +34,11 @@ import { BomSnapshot, EvidenceItemInput, WaiverInput } from '@sibeaver/core';
 // ============================================================
 
 export const operationHandlers: Record<string, (ctx: OperationContext, input: any) => Promise<any>> = {
-  define_goal: defineGoal,
-  decompose_goal: decomposeGoal,
-  update_goal_status: updateGoalStatus,
-  begin_exploration: beginExploration,
-  record_exploration_finding: recordExplorationFinding,
-  conclude_exploration: concludeExploration,
-  abandon_exploration: abandonExploration,
+  define_witem: defineWitem,
+  decompose_witem: decomposeWitem,
+  update_witem_status: updateWitemStatus,
   record_decision: recordDecision,
+  update_decision_status: updateDecisionStatus,
   define_requirement: defineRequirement,
   update_requirement_status: updateRequirementStatus,
   update_requirement_acceptance: updateRequirementAcceptance,
@@ -219,7 +213,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const maxDepth = c.req.query('max-depth');
     try {
       const result = await getRoadmap(getCtx(slug), {
-        root_goal: rootGoal || undefined,
+        root_witem: rootGoal || undefined,
         include_completed: includeCompleted,
         max_depth: maxDepth ? Number(maxDepth) : undefined,
       });
@@ -229,9 +223,9 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     }
   });
 
-  app.get('/:project/api/v1/goals/progress', async (c) => {
+  app.get('/:project/api/v1/witems/progress', async (c) => {
     const slug = c.req.param('project');
-    return json(c, await goalProgress(getCtx(slug)));
+    return json(c, await witemProgress(getCtx(slug)));
   });
 
   app.get('/:project/api/v1/knowledge', async (c) => {
@@ -249,7 +243,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const slug = c.req.param('project');
     const state = await getProjectState(getCtx(slug));
     const blockers = await currentBlockers(getCtx(slug));
-    return json(c, { goals: state.active_goals, requirements: state.requirements, blockers: blockers.blockers });
+    return json(c, { witems: state.active_witems, requirements: state.requirements, blockers: blockers.blockers });
   });
 
   app.get('/:project/api/v1/stale', async (c) => {
@@ -583,19 +577,6 @@ ${existingSummary || '（暂无）'}
     }
   });
 
-  // === 对话蒸馏 ===
-
-  app.post('/:project/api/v1/conversation/distill', async (c) => {
-    const slug = c.req.param('project');
-    const body = await c.req.json();
-    try {
-      const result = await distillConversation(getCtx(slug), body);
-      return json(c, result);
-    } catch (e: any) {
-      return json(c, { error: e.message }, 500);
-    }
-  });
-
   // === 项目级写操作 ===
 
   app.post('/:project/api/v1/operations/:name', async (c) => {
@@ -645,100 +626,6 @@ ${existingSummary || '（暂无）'}
     llmModel: config.llmModel,
   }));
 
-  app.post('/api/v1/distill/refine', async (c) => {
-    const body = await c.req.json();
-    const { requirementId, message } = body;
-    if (!requirementId) return c.json({ error: '缺少 requirementId' }, 400);
-    if (!message) return c.json({ error: '缺少 message' }, 400);
-    if (typeof message !== 'string' || typeof requirementId !== 'string') {
-      return c.json({ error: '参数类型错误' }, 400);
-    }
-    const cappedMessage = message.length > MAX_INPUT_CHARS ? message.slice(0, MAX_INPUT_CHARS) : message;
-
-    const { sibs } = await import('../sibs-client.js');
-    const { chatCompletion } = await import('../llm-client.js');
-    const ctx = await sibs.getNodeContext(requirementId);
-    const node = ctx.node as any;
-    if (!node) return c.json({ error: '需求不存在' }, 404);
-
-    const state = await sibs.getProjectState();
-
-    const messages = [
-      {
-        role: 'system',
-        content: `你是 Distill Agent，负责帮助用户精炼需求。你的职责：
-1. 分析需求的 WHY 是否清晰（来源、动机、裁剪理由）
-2. 检测与现有需求的潜在冲突
-3. 识别缺失的维度
-4. 建议补充描述
-
-当前项目有 ${state.requirements.length} 个需求。
-
-当前需求：
-标题: ${node.title}
-描述: ${node.description || '无'}
-来源: ${node.source ?? '未知'}
-状态: ${node.status}
-
-现有已接受的需求（用于冲突检测）：
-${state.requirements.filter((r: any) => r.id !== requirementId).map((r: any) => `- ${r.title}`).join('\n') || '无'}
-
-请用中文回答，给出具体可操作的建议。`,
-      },
-      { role: 'user', content: cappedMessage },
-    ];
-
-    const response = await chatCompletion(messages as any);
-    return c.json({ reply: response.content, usage: response.usage });
-  });
-
-  app.post('/api/v1/distill/check-conflicts', async (c) => {
-    const body = await c.req.json();
-    const { requirementId } = body;
-    if (!requirementId) return c.json({ error: '缺少 requirementId' }, 400);
-
-    const { sibs } = await import('../sibs-client.js');
-    const { chatCompletion } = await import('../llm-client.js');
-    const ctx = await sibs.getNodeContext(requirementId);
-    const node = ctx.node as any;
-    if (!node) return c.json({ error: '需求不存在' }, 404);
-
-    const state = await sibs.getProjectState();
-    const others = state.requirements.filter(
-      (r: any) => r.id !== requirementId && !['deprecated', 'satisfied'].includes(r.status)
-    );
-
-    if (others.length === 0) {
-      return c.json({ requirementId, conflicts: [], message: '无其他活跃需求' });
-    }
-
-    const messages = [
-      {
-        role: 'system',
-        content: `分析以下需求是否与现有需求存在冲突或重叠。输出 JSON:
-{ "conflicts": [{ "id": "...", "title": "...", "overlap": "high|medium|low", "reason": "..." }] }
-只报告 medium 或 high 重叠的。`,
-      },
-      {
-        role: 'user',
-        content: `目标需求:
-标题: ${node.title}
-描述: ${node.description || '无'}
-
-现有需求:
-${others.map((r: any) => `- [${r.id.slice(0, 8)}] ${r.title}: ${r.description || '无描述'}`).join('\n')}`,
-      },
-    ];
-
-    try {
-      const result = await chatCompletion(messages as any, { temperature: 0.2 });
-      const parsed = JSON.parse(result.content);
-      return c.json({ requirementId, ...parsed });
-    } catch {
-      return c.json({ requirementId, conflicts: [], error: 'LLM 解析失败' });
-    }
-  });
-
   return app;
 }
 
@@ -777,7 +664,7 @@ async function start() {
   const projectSlug = config.sibsProject || await manager.getDefaultProject();
   console.log(`[sibs] project=${projectSlug}`);
 
-  // Direct-mode bridge — distill/refine 等服务端调用走内存直连
+  // Direct-mode bridge — 服务端直连 sibs-client（无 HTTP 往返）
   setDirectSibs(buildDirectSibs(manager, projectSlug));
 
   const honoListener = getRequestListener(app.fetch);
@@ -854,8 +741,8 @@ function buildDirectSibs(manager: ProjectManager, slug: string): DirectSibsConte
     getProjectState: () => getProjectState(getCtx()) as any,
     getNodeContext: (nodeId: string) => getNodeContext(getCtx(), nodeId) as any,
 
-    defineGoal: (input: any) =>
-      operationHandlers.define_goal(getCtx(), camelToSnake(input)),
+    defineWitem: (input: any) =>
+      operationHandlers.define_witem(getCtx(), camelToSnake(input)),
 
     updateRequirementStatus: (input: any) =>
       operationHandlers.update_requirement_status(getCtx(), camelToSnake(input)),

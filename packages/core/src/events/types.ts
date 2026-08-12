@@ -6,18 +6,10 @@ import type { NodeType } from '../nodes/types.js';
 // ============================================================
 
 export const EventType = z.enum([
-  // Goal
-  'goal.defined',
-  'goal.decomposed',
-  'goal.status_changed',
-  // Task
-  'task.created',
-  'task.status_changed',
-  // Exploration
-  'exploration.started',
-  'exploration.finding_recorded',
-  'exploration.concluded',
-  'exploration.abandoned',
+  // Witem
+  'witem.defined',
+  'witem.decomposed',
+  'witem.status_changed',
   // Decision
   'decision.recorded',
   'decision.superseded',
