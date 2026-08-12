@@ -20,8 +20,6 @@ export { config } from './config/index.js';
 export { sibs, setDirectSibs, type DirectSibsContext } from './sibs-client.js';
 export { chatCompletion, jsonCompletion } from './llm-client.js';
 export type { ChatMessage } from './llm-client.js';
-export { startPoller, onEvent, setDirectEventSource, type DirectEventSource } from './event-poller.js';
-export type { EventHandler } from './event-poller.js';
 export type {
   ApiEvent,
   ApiNode,

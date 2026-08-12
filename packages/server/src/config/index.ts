@@ -8,5 +8,4 @@ export const config = {
   llmApiKey: process.env.LLM_API_KEY || "",
   llmModel: process.env.LLM_MODEL || "gpt-4o",
   llmFlashModel: process.env.LLM_FLASH_MODEL || "deepseek-v4-flash",
-  pollInterval: parseInt(process.env.POLL_INTERVAL || "10000", 10),
 };

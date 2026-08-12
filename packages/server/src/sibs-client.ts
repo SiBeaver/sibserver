@@ -13,7 +13,6 @@ import type {
 export interface DirectSibsContext {
   getProjectState: () => Promise<ApiProjectState>;
   getNodeContext: (nodeId: string) => Promise<ApiNodeContext>;
-  getEvents: (since?: string, limit?: number) => Promise<{ events: ApiEvent[] }>;
   defineGoal: (input: any) => Promise<any>;
   updateRequirementStatus: (input: any) => Promise<any>;
   linkNodes: (input: any) => Promise<any>;
@@ -80,13 +79,6 @@ export const sibs = {
   getNodeContext(nodeId: string) {
     if (directCtx) return directCtx.getNodeContext(nodeId);
     return request<ApiNodeContext>(projectPath(`/nodes/${nodeId}`));
-  },
-
-  getEvents(since?: string, limit = 50) {
-    if (directCtx) return directCtx.getEvents(since, limit);
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (since) params.set("since", since);
-    return request<{ events: ApiEvent[] }>(projectPath(`/events?${params}`));
   },
 
   defineGoal(input: {

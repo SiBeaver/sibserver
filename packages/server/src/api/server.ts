@@ -22,13 +22,10 @@ import {
   distillConversation,
 } from '../index.js';
 import { ProjectManager } from '../projects/index.js';
-import { startPoller, onEvent, setDirectEventSource } from '../event-poller.js';
-import type { DirectEventSource } from '../event-poller.js';
 import { setDirectSibs } from '../sibs-client.js';
 import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
 import { snakeToCamel, camelToSnake, kebabToSnake, toApiEvent } from './transforms.js';
-import { handleRequirementAccepted } from '../policies/triggers/requirement-trigger.js';
 import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
 import { evaluateConstraints, summarizeResults } from '../policies/constraint-evaluator.js';
 import type { Constraint, EvidenceInput } from '@sibeaver/core';
@@ -646,33 +643,7 @@ ${existingSummary || '（暂无）'}
   app.get('/api/v1/config', (c) => c.json({
     sibsProject: config.sibsProject,
     llmModel: config.llmModel,
-    pollInterval: config.pollInterval,
   }));
-
-  app.post('/api/v1/policies/from-requirement', async (c) => {
-    const body = await c.req.json();
-    const requirementId = body.requirementId;
-    if (!requirementId) return c.json({ error: '缺少 requirementId' }, 400);
-
-    const fakeEvent = {
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      eventType: 'requirement.status_changed',
-      actor: 'system',
-      operation: 'trigger-policy',
-      nodeId: requirementId,
-      nodeType: 'requirement',
-      payload: {},
-      diff: [{ field: 'status', oldValue: 'proposed', newValue: 'accepted' }],
-      context: null,
-    };
-
-    handleRequirementAccepted(fakeEvent as any).catch(err => {
-      console.error('[policies/from-requirement] error:', err);
-    });
-
-    return c.json({ message: 'policy triggered', requirementId }, 202);
-  });
 
   app.post('/api/v1/distill/refine', async (c) => {
     const body = await c.req.json();
@@ -806,12 +777,8 @@ async function start() {
   const projectSlug = config.sibsProject || await manager.getDefaultProject();
   console.log(`[sibs] project=${projectSlug}`);
 
-  // Direct-mode bridges — policies call sibs.* without HTTP roundtrip
+  // Direct-mode bridge — distill/refine 等服务端调用走内存直连
   setDirectSibs(buildDirectSibs(manager, projectSlug));
-  setDirectEventSource(buildDirectEventSource(manager, projectSlug));
-
-  // Cloud event handlers
-  onEvent('requirement.status_changed', handleRequirementAccepted);
 
   const honoListener = getRequestListener(app.fetch);
   const MCP_PATH = /^\/([a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9])\/mcp$/;
@@ -858,8 +825,6 @@ async function start() {
     console.log(`sibs running at http://localhost:${PORT}`);
     console.log(`  REST API: http://localhost:${PORT}/{project}/api/v1/...`);
     console.log(`  MCP:      http://localhost:${PORT}/{project}/mcp`);
-
-    startPoller();
   });
 
   // Graceful shutdown
@@ -889,16 +854,6 @@ function buildDirectSibs(manager: ProjectManager, slug: string): DirectSibsConte
     getProjectState: () => getProjectState(getCtx()) as any,
     getNodeContext: (nodeId: string) => getNodeContext(getCtx(), nodeId) as any,
 
-    getEvents: async (since?: string, limit = 50) => {
-      const ctx = getCtx();
-      if (since) {
-        const events = await ctx.eventStore.getSince(since);
-        return { events: events.map(toApiEvent) };
-      }
-      const events = await ctx.eventStore.getRecent(limit);
-      return { events: events.map(toApiEvent) };
-    },
-
     defineGoal: (input: any) =>
       operationHandlers.define_goal(getCtx(), camelToSnake(input)),
 
@@ -913,20 +868,6 @@ function buildDirectSibs(manager: ProjectManager, slug: string): DirectSibsConte
 
     identifyRisk: (input: any) =>
       operationHandlers.identify_risk(getCtx(), camelToSnake(input)),
-  };
-}
-
-function buildDirectEventSource(manager: ProjectManager, slug: string): DirectEventSource {
-  return {
-    getEvents: async (since?: string, limit = 50) => {
-      const ctx = manager.getContext(slug);
-      if (since) {
-        const events = await ctx.eventStore.getSince(since);
-        return { events: events.map(toApiEvent) };
-      }
-      const events = await ctx.eventStore.getRecent(limit);
-      return { events: events.map(toApiEvent) };
-    },
   };
 }
 
