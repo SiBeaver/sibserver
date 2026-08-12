@@ -699,7 +699,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await fullTextSearch(getCtx(), args.query));
   }));
 
-  // --- 投影 --- @sibom r-t5jw
+  // --- 投影 ---
   server.tool('generate_projection', '从语义节点生成 Markdown 投影文档', {
     type: z.string().describe('投影类型，如 "adr"'),
   }, log('generate_projection', async (args) => {

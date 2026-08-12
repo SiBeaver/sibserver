@@ -1,4 +1,3 @@
-// @sibom r-q4x8
 import type { OperationContext } from '@sibeaver/core';
 import type {
   GoalNode,

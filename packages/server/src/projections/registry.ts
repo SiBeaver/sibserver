@@ -1,4 +1,3 @@
-// @sibom r-x9c4
 import type { ProjectionTemplate } from './types.js';
 import { adrProjection } from './engines/adr.js';
 import { roadmapProjection } from './engines/roadmap.js';

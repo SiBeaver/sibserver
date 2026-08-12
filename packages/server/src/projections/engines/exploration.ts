@@ -1,4 +1,3 @@
-// @sibom r-m3v9
 import type { OperationContext } from '@sibeaver/core';
 import type { ExplorationNode } from '@sibeaver/core';
 import type {

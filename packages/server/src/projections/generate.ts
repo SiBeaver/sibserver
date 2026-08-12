@@ -1,4 +1,3 @@
-// @sibom r-7k2m
 import { getProjection } from './registry.js';
 import type { OperationContext } from '@sibeaver/core';
 import type { ProjectionConfigEntry, GeneratedProjection } from './types.js';
