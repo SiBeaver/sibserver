@@ -10,6 +10,7 @@ import {
   recordKnowledge,
   createTask,
   linkNodes, getProjectState, getNodeContext,
+  defineRequirement, updateRequirementStatus,
 } from '../src/operations/index.js';
 
 describe('Operations Layer', () => {
@@ -377,6 +378,33 @@ describe('Operations Layer', () => {
 
     it('应该抛出节点不存在错误', async () => {
       await expect(getNodeContext(ctx, 'nonexistent')).rejects.toThrow('节点不存在：nonexistent');
+    });
+  });
+
+  describe('updateRequirementStatus', () => {
+    it('satisfied 可转 deprecated（满足但键已移出 BOM 的旧节点清理路径）', async () => {
+      const { requirement } = await defineRequirement(ctx, {
+        title: '旧域需求', source: 'vibespec', source_detail: 'old-domain/ghost',
+      });
+      await updateRequirementStatus(ctx, { requirement_id: requirement.id, new_status: 'accepted', reason: '受理' });
+      await updateRequirementStatus(ctx, { requirement_id: requirement.id, new_status: 'in_execution', reason: '开工' });
+      await updateRequirementStatus(ctx, { requirement_id: requirement.id, new_status: 'satisfied', reason: '已达成' });
+      const { requirement: updated } = await updateRequirementStatus(ctx, {
+        requirement_id: requirement.id, new_status: 'deprecated', reason: 'BOM 键已消失',
+      });
+      expect(updated.status).toBe('deprecated');
+    });
+
+    it('deprecated 不可重复废弃', async () => {
+      const { requirement } = await defineRequirement(ctx, {
+        title: '需求', source: 'vibespec', source_detail: 'dom/req',
+      });
+      await updateRequirementStatus(ctx, {
+        requirement_id: requirement.id, new_status: 'deprecated', reason: '移除',
+      });
+      await expect(updateRequirementStatus(ctx, {
+        requirement_id: requirement.id, new_status: 'deprecated', reason: '重复',
+      })).rejects.toThrow(/无效状态迁移/);
     });
   });
 });

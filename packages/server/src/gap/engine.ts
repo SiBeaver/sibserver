@@ -134,6 +134,7 @@ async function computeDesiredGaps(
 
   const requirementNodes = await ctx.nodes.getByType('requirement') as RequirementNode[];
   for (const node of requirementNodes) {
+    if (node.status === 'deprecated') continue; // 已废弃节点不再报需求过时（sync 清理路径）
     const key = node.source_detail;
     if (!key || bomKeys.has(key)) continue;
     gaps.push({

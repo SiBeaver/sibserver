@@ -92,8 +92,8 @@ export async function updateRequirementStatus(ctx: OperationContext, input: Upda
     const oldStatus = requirement.status;
 
     if (input.new_status === 'deprecated') {
-      // deprecated can be reached from any non-terminal state
-      if (oldStatus === 'satisfied' || oldStatus === 'deprecated') {
+      // 任意状态可废弃（含 satisfied——满足但键已移出 BOM 的旧节点清理路径）；仅防重复废弃
+      if (oldStatus === 'deprecated') {
         throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
       }
     } else {

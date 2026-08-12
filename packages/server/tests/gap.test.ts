@@ -144,6 +144,24 @@ describe('Gap 引擎三方对账', () => {
     expect(staleSibom?.severity).toBe('medium');
   });
 
+  it('已废弃 requirement 节点不报需求过时，活跃节点仍报', async () => {
+    await ctx.nodes.insert({
+      id: 'req-deprecated', type: 'requirement', title: '旧域需求', description: '', status: 'deprecated',
+      tags: [], created_at: NOW, updated_at: NOW, metadata: {},
+      priority: 'medium', source: 'vibespec', source_detail: 'old-domain/ghost', acceptance: null,
+    });
+    await ctx.nodes.insert({
+      id: 'req-active', type: 'requirement', title: '失键需求', description: '', status: 'in_execution',
+      tags: [], created_at: NOW, updated_at: NOW, metadata: {},
+      priority: 'medium', source: 'vibespec', source_detail: 'dom/ghost', acceptance: null,
+    });
+    await setBaseline(ctx, bomV1(), NOW);
+    const ledger = await listGaps(ctx);
+    const stale = ledger.gaps.filter(g => g.kind === 'staleness' && g.source_ref === 'req-deprecated' || g.source_ref === 'req-active');
+    expect(stale.find(g => g.source_ref === 'req-deprecated')).toBeUndefined();
+    expect(stale.find(g => g.source_ref === 'req-active')).toBeTruthy();
+  });
+
   it('goal 标注：创建在办 goal 后差距不消失，附在办标记', async () => {
     await ctx.nodes.insert({
       id: 'req-node-a', type: 'requirement', title: '需求A', description: '', status: 'in_execution',
