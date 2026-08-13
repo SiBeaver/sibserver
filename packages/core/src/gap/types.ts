@@ -4,7 +4,7 @@ import { Constraint } from '../constraints/types.js';
 // ============================================================
 // Gap 检测 — 三方对账类型
 //
-// 对账是纯函数：gap = f(BOM@commit, 证据集, 在办 goal)。
+// 对账是纯函数：gap = f(BOM@commit, 证据集, 在办 witem)。
 // BOM 快照随基准上报（sibs server 不扫工作区），gap 账本是派生账。
 // ============================================================
 
@@ -99,7 +99,7 @@ export interface WaiverRecord {
 // ── 账单视图（读账本）────────────────────────────────────────
 
 export interface GapView extends GapRowRecord {
-  in_progress_goal: { id: string; title: string } | null;
+  in_progress_witem: { id: string; title: string } | null;
   waiver: { reason: string; expires_at: string | null } | null;
   /** 该行对应证据的上报时间——账单展示证据年龄；无证据行为 null */
   evidence_reported_at: string | null;

@@ -38,15 +38,15 @@ describe('Query Operations', () => {
     });
 
     it('应该返回顶层目标树', async () => {
-      const goal = await defineWitem(ctx, { title: '顶层目标', horizon: 'long', priority: 'high' });
+      const witem = await defineWitem(ctx, { title: '顶层目标', horizon: 'long', priority: 'high' });
       await decomposeWitem(ctx, {
-        witem_id: goal.witem.id,
+        witem_id: witem.witem.id,
         sub_witems: [{ title: '子目标1', horizon: 'short' }],
       });
 
       const result = await getRoadmap(ctx);
       expect(result.roadmap).toHaveLength(1);
-      expect(result.roadmap[0].node.id).toBe(goal.witem.id);
+      expect(result.roadmap[0].node.id).toBe(witem.witem.id);
       expect(result.roadmap[0].children).toHaveLength(1);
       expect(result.roadmap[0].progress.total).toBe(1);
       expect(result.roadmap[0].progress.done).toBe(0);
@@ -66,9 +66,9 @@ describe('Query Operations', () => {
     });
 
     it('应该过滤已完成目标（默认）', async () => {
-      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      const witem = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
       await updateWitemStatus(ctx, {
-        witem_id: goal.witem.id,
+        witem_id: witem.witem.id,
         new_status: 'achieved',
         reason: '完成',
       });
@@ -92,9 +92,9 @@ describe('Query Operations', () => {
     });
 
     it('应该计算目标子项完成率', async () => {
-      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
-      const child1 = await defineWitem(ctx, { title: '子项1', horizon: 'short', priority: 'medium', parent_witem: goal.witem.id });
-      const child2 = await defineWitem(ctx, { title: '子项2', horizon: 'short', priority: 'medium', parent_witem: goal.witem.id });
+      const witem = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      const child1 = await defineWitem(ctx, { title: '子项1', horizon: 'short', priority: 'medium', parent_witem: witem.witem.id });
+      const child2 = await defineWitem(ctx, { title: '子项2', horizon: 'short', priority: 'medium', parent_witem: witem.witem.id });
 
       // 完成其中一个子项
       await updateWitemStatus(ctx, { witem_id: child1.witem.id, new_status: 'achieved', reason: '完成' });
@@ -162,23 +162,23 @@ describe('Query Operations', () => {
   describe('staleItems', () => {
     it('应该返回过期节点', async () => {
       // 创建一个目标然后手动修改 updated_at 到过去
-      const goal = await defineWitem(ctx, { title: '旧目标', horizon: 'short', priority: 'low' });
+      const witem = await defineWitem(ctx, { title: '旧目标', horizon: 'short', priority: 'low' });
       const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
-      const node = await ctx.nodes.getById(goal.witem.id)!;
+      const node = await ctx.nodes.getById(witem.witem.id)!;
       await ctx.nodes.update({ ...node, updated_at: oldDate } as any);
 
       const result = await staleItems(ctx, 7);
       expect(result.stale_items).toHaveLength(1);
-      expect(result.stale_items[0].id).toBe(goal.witem.id);
+      expect(result.stale_items[0].id).toBe(witem.witem.id);
     });
 
     it('不应该包含已完成的节点', async () => {
-      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'low' });
-      await updateWitemStatus(ctx, { witem_id: goal.witem.id, new_status: 'achieved', reason: '完成' });
+      const witem = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'low' });
+      await updateWitemStatus(ctx, { witem_id: witem.witem.id, new_status: 'achieved', reason: '完成' });
 
       // 手动设为过期
       const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
-      const node = await ctx.nodes.getById(goal.witem.id)!;
+      const node = await ctx.nodes.getById(witem.witem.id)!;
       await ctx.nodes.update({ ...node, updated_at: oldDate } as any);
 
       const result = await staleItems(ctx, 7);
@@ -192,13 +192,13 @@ describe('Query Operations', () => {
 
   describe('currentBlockers', () => {
     it('应该找到阻塞目标的风险', async () => {
-      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      const witem = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
       await identifyRisk(ctx, {
         title: '阻塞风险',
         description: '问题',
         likelihood: 'high',
         impact: 'critical',
-        affected_witems: [goal.witem.id],
+        affected_witems: [witem.witem.id],
       });
 
       const result = await currentBlockers(ctx);

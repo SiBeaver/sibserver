@@ -28,7 +28,7 @@ describe('Storage Layer', () => {
   });
 
   describe('NodeStore', () => {
-    it('应该能插入和读取 Goal 节点', async () => {
+    it('应该能插入和读取 witem 节点', async () => {
       const now = new Date().toISOString();
       const witem: WitemNode = {
         id: ulid(),
@@ -69,9 +69,9 @@ describe('Storage Layer', () => {
         valid_until: null, content: '', parent_id: null, pinned: false, sort_order: 0,
       } as any);
 
-      const goals = await nodes.getByType('witem');
-      expect(goals).toHaveLength(1);
-      expect(goals[0].title).toBe('Witem 1');
+      const witems = await nodes.getByType('witem');
+      expect(witems).toHaveLength(1);
+      expect(witems[0].title).toBe('Witem 1');
     });
 
     it('应该支持全文搜索', async () => {

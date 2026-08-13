@@ -409,7 +409,7 @@ export async function reportEvidence(
   return { ...r, accepted, skipped };
 }
 
-// ── 账单读取（goal 标注 + 豁免静默标记）──────────────────────
+// ── 账单读取（witem 标注 + 豁免静默标记）──────────────────────
 
 export async function listGaps(ctx: OperationContext): Promise<{
   bom_commit: string | null;
@@ -426,7 +426,7 @@ export async function listGaps(ctx: OperationContext): Promise<{
       .map(w => [w.fingerprint, w]),
   );
 
-  const goalByKey = await inProgressGoalsByKey(ctx, baseline?.bom ?? null);
+  const witemByKey = await inProgressWitemsByKey(ctx, baseline?.bom ?? null);
   const reportedAtBySource = new Map(
     (await ctx.gap.getAllEvidence()).map(ev => [ev.source_id, ev.reported_at]),
   );
@@ -436,7 +436,7 @@ export async function listGaps(ctx: OperationContext): Promise<{
     const waiver = activeWaivers.get(row.condition_fingerprint) ?? null;
     return {
       ...row,
-      in_progress_goal: goalByKey.get(row.requirement_key) ?? null,
+      in_progress_witem: witemByKey.get(row.requirement_key) ?? null,
       waiver: waiver ? { reason: waiver.reason, expires_at: waiver.expires_at } : null,
       evidence_reported_at: row.evidence_fingerprint === null
         ? null
@@ -524,7 +524,7 @@ export async function buildEvidenceScene(
   return scene;
 }
 
-async function inProgressGoalsByKey(
+async function inProgressWitemsByKey(
   ctx: OperationContext,
   bom: BomSnapshot | null,
 ): Promise<Map<string, { id: string; title: string }>> {

@@ -102,7 +102,7 @@ describe('Gap 引擎三方对账', () => {
     expect(all.filter(r => r.status === 'resolved').length).toBeGreaterThan(0);
   });
 
-  it('需求过时检测：需求键失配可发现（约束 / sibs 节点 / @bom 标签 / 在办 goal / @sibom 悬空）', async () => {
+  it('需求过时检测：需求键失配可发现（约束 / sibs 节点 / @bom 标签 / 在办 witem / @sibom 悬空）', async () => {
     const bom = bomV1();
     bom.constraints.push({
       id: 'c-gone',
@@ -119,12 +119,12 @@ describe('Gap 引擎三方对账', () => {
       priority: 'medium', source: 'specs-md', source_detail: 'dom/ghost', acceptance: null,
     });
     await ctx.nodes.insert({
-      id: 'goal-1', type: 'witem', title: '在办单', description: '', status: 'active',
+      id: 'witem-1', type: 'witem', title: '在办单', description: '', status: 'active',
       tags: [], created_at: NOW, updated_at: NOW, metadata: {},
       horizon: 'short', success_criteria: [], priority: 'high',
     });
     await ctx.edges.insert({
-      id: 'e1', source_id: 'goal-1', target_id: 'req-node-1', relation: 'fulfills',
+      id: 'e1', source_id: 'witem-1', target_id: 'req-node-1', relation: 'fulfills',
       weight: null, annotation: null, created_at: NOW,
     });
     await setBaseline(ctx, bom, NOW);
@@ -136,7 +136,7 @@ describe('Gap 引擎三方对账', () => {
     const stale = ledger.gaps.filter(g => g.kind === 'staleness');
     expect(stale.map(g => g.requirement_key).sort()).toEqual(['(global)', 'dom/dead', 'dom/ghost', 'dom/ghost', 'dom/gone'].sort());
     expect(stale.find(g => g.source_ref === 'c-gone')).toBeTruthy();
-    expect(stale.find(g => g.source_ref === 'goal-1')).toBeTruthy();
+    expect(stale.find(g => g.source_ref === 'witem-1')).toBeTruthy();
     expect(stale.find(g => g.source_ref === '@bom:dom/dead')?.detail).toContain('src/a.ts');
     const staleSibom = stale.find(g => g.source_ref === '@sibom:r-zzzz');
     expect(staleSibom).toBeTruthy();
@@ -162,19 +162,19 @@ describe('Gap 引擎三方对账', () => {
     expect(stale.find(g => g.source_ref === 'req-active')).toBeTruthy();
   });
 
-  it('goal 标注：创建在办 goal 后差距不消失，附在办标记', async () => {
+  it('witem 标注：创建在办 witem 后差距不消失，附在办标记', async () => {
     await ctx.nodes.insert({
       id: 'req-node-a', type: 'requirement', title: '需求A', description: '', status: 'in_execution',
       tags: [], created_at: NOW, updated_at: NOW, metadata: {},
       priority: 'high', source: 'specs-md', source_detail: 'dom/req-a', acceptance: null,
     });
     await ctx.nodes.insert({
-      id: 'goal-a', type: 'witem', title: '弥合A', description: '', status: 'active',
+      id: 'witem-a', type: 'witem', title: '弥合A', description: '', status: 'active',
       tags: [], created_at: NOW, updated_at: NOW, metadata: {},
       horizon: 'short', success_criteria: [], priority: 'high',
     });
     await ctx.edges.insert({
-      id: 'e-a', source_id: 'goal-a', target_id: 'req-node-a', relation: 'fulfills',
+      id: 'e-a', source_id: 'witem-a', target_id: 'req-node-a', relation: 'fulfills',
       weight: null, annotation: null, created_at: NOW,
     });
     await setBaseline(ctx, bomV1(), NOW);
@@ -182,10 +182,10 @@ describe('Gap 引擎三方对账', () => {
     const reqAGaps = ledger.gaps.filter(g => g.requirement_key === 'dom/req-a');
     expect(reqAGaps.length).toBeGreaterThan(0);
     for (const g of reqAGaps) {
-      expect(g.in_progress_goal).toEqual({ id: 'goal-a', title: '弥合A' });
+      expect(g.in_progress_witem).toEqual({ id: 'witem-a', title: '弥合A' });
     }
     const reqBGap = ledger.gaps.find(g => g.requirement_key === 'dom/req-b');
-    expect(reqBGap?.in_progress_goal).toBeNull();
+    expect(reqBGap?.in_progress_witem).toBeNull();
   });
 
   it('豁免：指纹不变静默标记，过期或指纹变化重新报', async () => {

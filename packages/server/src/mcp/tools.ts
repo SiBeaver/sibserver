@@ -322,7 +322,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
 
   server.tool('decompose_witem', '将目标分解为子目标', {
     witem_id: z.string().describe('要分解的目标 ID'),
-    sub_goals: z.array(z.object({
+    sub_witems: z.array(z.object({
       title: z.string(), description: z.string().optional(),
       horizon: z.enum(['short', 'medium', 'long']),
       success_criteria: z.array(z.string()).optional(),
@@ -420,7 +420,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await updateRequirementAcceptance(getCtx(), args));
   }));
 
-  server.tool('evaluate_gap', '三方对账差距账单（违约/缺失/需求过时三型 + 在办 goal 标注 + 豁免）；未设基准时回退验收项对账', {
+  server.tool('evaluate_gap', '三方对账差距账单（违约/缺失/需求过时三型 + 在办 witem 标注 + 豁免）；未设基准时回退验收项对账', {
     requirement_id: z.string().optional().describe('需求 ID（仅未设基准的回退模式使用）'),
   }, log('evaluate_gap', async (args) => {
     const c = getCtx();
@@ -665,7 +665,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
   server.tool('decompose_witem', '将目标分解为子目标', {
     project: projectParam,
     witem_id: z.string().describe('要分解的目标 ID'),
-    sub_goals: z.array(z.object({
+    sub_witems: z.array(z.object({
       title: z.string(), description: z.string().optional(),
       horizon: z.enum(['short', 'medium', 'long']),
       success_criteria: z.array(z.string()).optional(),
@@ -769,7 +769,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await updateRequirementAcceptance(await ctx(project), args));
   }));
 
-  server.tool('evaluate_gap', '三方对账差距账单（违约/缺失/需求过时三型 + 在办 goal 标注 + 豁免）；未设基准时回退验收项对账', {
+  server.tool('evaluate_gap', '三方对账差距账单（违约/缺失/需求过时三型 + 在办 witem 标注 + 豁免）；未设基准时回退验收项对账', {
     project: projectParam,
     requirement_id: z.string().optional().describe('需求 ID（仅未设基准的回退模式使用）'),
   }, log('evaluate_gap', async ({ project, ...args }) => {

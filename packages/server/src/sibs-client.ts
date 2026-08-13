@@ -86,7 +86,7 @@ export const sibs = {
     description?: string; parent_witem?: string;
   }) {
     if (directCtx) return directCtx.defineWitem(input);
-    return operation("define-goal", input);
+    return operation("define-witem", input);
   },
 
   updateRequirementStatus(input: {

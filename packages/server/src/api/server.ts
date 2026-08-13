@@ -208,12 +208,12 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
 
   app.get('/:project/api/v1/roadmap', async (c) => {
     const slug = c.req.param('project');
-    const rootGoal = c.req.query('root-goal');
+    const rootWitem = c.req.query('root-witem');
     const includeCompleted = c.req.query('include-completed') === 'true';
     const maxDepth = c.req.query('max-depth');
     try {
       const result = await getRoadmap(getCtx(slug), {
-        root_witem: rootGoal || undefined,
+        root_witem: rootWitem || undefined,
         include_completed: includeCompleted,
         max_depth: maxDepth ? Number(maxDepth) : undefined,
       });

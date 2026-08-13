@@ -28,7 +28,7 @@ describe('Operations Layer', () => {
   });
 
   // ============================================================
-  // Goal Operations
+  // Witem Operations
   // ============================================================
 
   describe('defineWitem', () => {
@@ -65,9 +65,9 @@ describe('Operations Layer', () => {
 
   describe('decomposeWitem', () => {
     it('应该分解目标为子目标', async () => {
-      const goal = await defineWitem(ctx, { title: '大目标', horizon: 'long', priority: 'high' });
+      const witem = await defineWitem(ctx, { title: '大目标', horizon: 'long', priority: 'high' });
       const result = await decomposeWitem(ctx, {
-        witem_id: goal.witem.id,
+        witem_id: witem.witem.id,
         sub_witems: [{ title: '子目标A', horizon: 'medium' }],
       });
 
@@ -84,9 +84,9 @@ describe('Operations Layer', () => {
 
   describe('updateWitemStatus', () => {
     it('应该更新目标状态', async () => {
-      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'medium' });
+      const witem = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'medium' });
       const result = await updateWitemStatus(ctx, {
-        witem_id: goal.witem.id,
+        witem_id: witem.witem.id,
         new_status: 'achieved',
         reason: '已完成',
       });
@@ -96,10 +96,10 @@ describe('Operations Layer', () => {
     });
 
     it('应该拒绝无效的状态转换', async () => {
-      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'medium' });
-      await updateWitemStatus(ctx, { witem_id: goal.witem.id, new_status: 'achieved', reason: '完成' });
+      const witem = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'medium' });
+      await updateWitemStatus(ctx, { witem_id: witem.witem.id, new_status: 'achieved', reason: '完成' });
       await expect(updateWitemStatus(ctx, {
-        witem_id: goal.witem.id, new_status: 'active', reason: '回退',
+        witem_id: witem.witem.id, new_status: 'active', reason: '回退',
       })).rejects.toThrow('无效状态迁移：achieved → active');
     });
   });
@@ -182,13 +182,13 @@ describe('Operations Layer', () => {
 
   describe('identifyRisk', () => {
     it('应该识别风险并关联目标', async () => {
-      const goal = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
+      const witem = await defineWitem(ctx, { title: '目标', horizon: 'short', priority: 'high' });
       const result = await identifyRisk(ctx, {
         title: '风险',
         description: '可能出问题',
         likelihood: 'medium',
         impact: 'high',
-        affected_witems: [goal.witem.id],
+        affected_witems: [witem.witem.id],
       });
 
       expect(result.risk.status).toBe('identified');

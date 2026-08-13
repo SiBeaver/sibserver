@@ -69,14 +69,14 @@ describe('MCP 响应瘦身', () => {
 
   it('slimEnvelope 保留标量，投影节点/边/事件（camelCase 输出）', () => {
     const out = slimEnvelope({
-      goal: { id: 'g1', type: 'witem', title: 'G', status: 'active', success_criteria: ['x'] },
+      witem: { id: 'g1', type: 'witem', title: 'G', status: 'active', success_criteria: ['x'] },
       edges_created: [{ id: 'e1', source_id: 'g1', target_id: 'g2', relation: 'blocks' }],
-      event: { id: 'ev1', event_type: 'goal.created', payload: { big: 'data' } },
+      event: { id: 'ev1', event_type: 'witem.defined', payload: { big: 'data' } },
     } as any);
     expect(out).toEqual({
-      goal: { id: 'g1', type: 'witem', title: 'G', status: 'active' },
+      witem: { id: 'g1', type: 'witem', title: 'G', status: 'active' },
       edges_created: [{ id: 'e1', sourceId: 'g1', targetId: 'g2', relation: 'blocks' }],
-      event: { id: 'ev1', eventType: 'goal.created' },
+      event: { id: 'ev1', eventType: 'witem.defined' },
     });
   });
 
