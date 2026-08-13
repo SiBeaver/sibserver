@@ -54,12 +54,12 @@ export async function recordKnowledge(ctx: OperationContext, input: RecordKnowle
 
     for (const fromId of input.derived_from ?? []) {
       const from = await tx.nodes.getById(fromId);
-      if (!from || !validateRelation('produces', from.type as NodeType, 'knowledge')) {
+      if (!from || !validateRelation('derived_from', from.type as NodeType, 'knowledge')) {
         throw new Error(`来源节点不存在或类型不符：${fromId}`);
       }
       const edge: Edge = {
         id: ulid(), source_id: fromId, target_id: knowledge.id,
-        relation: 'produces', weight: null, annotation: null, created_at: now,
+        relation: 'derived_from', weight: null, annotation: null, created_at: now,
       };
       await tx.edges.insert(edge);
       edges_created.push(edge);

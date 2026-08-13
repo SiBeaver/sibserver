@@ -261,6 +261,29 @@ describe('Operations Layer', () => {
       const oldNode = await ctx.nodes.getById(old.knowledge.id);
       expect(oldNode!.status).toBe('outdated');
     });
+
+    it('应该支持从工作项派生（derived_from 锚点必填）', async () => {
+      const w = await defineWitem(ctx, { title: '锚点工作项', horizon: 'short', priority: 'medium' });
+      const result = await recordKnowledge(ctx, {
+        title: '派生知识', description: '内容', domain: 'test', source: 'src',
+        derived_from: [w.witem.id],
+      });
+
+      expect(result.edges_created).toHaveLength(1);
+      expect(result.edges_created[0].relation).toBe('derived_from');
+      expect(result.edges_created[0].source_id).toBe(w.witem.id);
+    });
+
+    it('应该拒绝非工作项来源（知识锚定只认 witem）', async () => {
+      const w = await defineWitem(ctx, { title: '决策锚点', horizon: 'short', priority: 'medium' });
+      const d = await recordDecision(ctx, {
+        title: '决策', context: 'ctx', rationale: 'why', related_witems: [w.witem.id],
+      });
+      await expect(recordKnowledge(ctx, {
+        title: '无锚知识', description: '内容', domain: 'test', source: 'src',
+        derived_from: [d.decision.id],
+      })).rejects.toThrow('来源节点不存在或类型不符');
+    });
   });
 
   // ============================================================

@@ -500,7 +500,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     confidence: z.enum(['low', 'medium', 'high']).optional().describe('确信程度'),
     source: z.string().describe('来源'),
     scope: z.enum(['project', 'domain']).optional().describe('知识范围：project=项目特定，domain=可跨项目复用的领域经验'),
-    derived_from: z.array(z.string()).optional().describe('来源节点 ID'),
+    derived_from: z.array(z.string()).optional().describe('来源工作项 ID（witem）——锚点必填：知识须挂工作项留痕'),
     invalidates: z.array(z.string()).optional().describe('被此知识取代的旧知识 ID'),
     tags: z.array(z.string()).optional().describe('标签'),
   }, log('record_knowledge', async (args) => {
