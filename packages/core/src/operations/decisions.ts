@@ -39,12 +39,7 @@ export interface RecordDecisionInput {
 
 export async function recordDecision(ctx: OperationContext, input: RecordDecisionInput) {
   return ctx.withTx(async (tx) => {
-    // 统一图谱锚点必填：写入即锚定，从 ROOT 可达为结构存活判据
-    const hasAnchor = (input.related_witems?.length ?? 0) > 0 || !!input.supersedes;
-    if (!hasAnchor) {
-      throw new Error('决策必须关联工作项（related_witems）或取代旧决策（supersedes）——写入即锚定，悬空节点不被回收');
-    }
-
+    // 锚点可选：决策可独立沉淀，不强制挂 witem（witem 是人建的临时任务实体）；无锚即悬空、仍可全文检索
     const now = new Date().toISOString();
 
     const decision: DecisionNode = {

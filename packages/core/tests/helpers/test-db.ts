@@ -10,7 +10,7 @@ export function testConnectionString(): string {
 
 const TRUNCATE_TABLES = [
   'projects', 'config', 'nodes', 'edges', 'events',
-  'gap_baseline', 'gap_rows', 'gap_evidence', 'gap_waivers',
+  'gap_baseline', 'gap_rows', 'gap_evidence', 'gap_evidence_log', 'gap_waivers',
 ];
 
 // vector 扩展需 superuser 创建；缺失时跳过扩展语句避免 schema 初始化失败

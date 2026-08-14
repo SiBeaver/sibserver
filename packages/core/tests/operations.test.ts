@@ -137,6 +137,18 @@ describe('Operations Layer', () => {
       expect(result.edges_created.length).toBeGreaterThanOrEqual(2);
     });
 
+    it('应该支持无锚决策（不强挂 witem）', async () => {
+      const result = await recordDecision(ctx, {
+        title: '无锚决策',
+        context: '自发的设计决策，尚无工作项',
+        rationale: '决策可独立沉淀，锚点可选',
+      });
+
+      expect(result.decision.title).toBe('无锚决策');
+      expect(result.decision.status).toBe('accepted');
+      expect(result.edges_created).toHaveLength(0);
+    });
+
     it('应该支持取代旧决策', async () => {
       const anchor = await defineWitem(ctx, { title: '锚', horizon: 'short', priority: 'medium' });
       const old = await recordDecision(ctx, { title: '旧决策', context: 'ctx', rationale: 'r', related_witems: [anchor.witem.id] });

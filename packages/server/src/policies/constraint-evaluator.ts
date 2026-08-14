@@ -36,27 +36,6 @@ export async function evaluateConstraint(
   return { ...base, ...result };
 }
 
-export async function evaluateConstraints(
-  constraints: Constraint[],
-  evidence: EvidenceInput,
-  ctx?: OperationContext,
-): Promise<ConstraintResult[]> {
-  const results: ConstraintResult[] = [];
-  for (const c of constraints) {
-    results.push(await evaluateConstraint(c, evidence, ctx));
-  }
-  return results;
-}
-
-export function summarizeResults(results: ConstraintResult[]) {
-  return {
-    total: results.length,
-    satisfied: results.filter(r => r.satisfied === true).length,
-    violated: results.filter(r => r.satisfied === false).length,
-    no_evidence: results.filter(r => r.satisfied === null).length,
-  };
-}
-
 // ── Per-type evaluators ─────────────────────────────────────
 
 async function evaluateCondition(

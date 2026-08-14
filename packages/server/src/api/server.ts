@@ -23,11 +23,8 @@ import { setDirectSibs } from '../sibs-client.js';
 import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
 import { snakeToCamel, camelToSnake, kebabToSnake, toApiEvent } from './transforms.js';
-import { evaluateAcceptanceGap, evaluateAllAcceptanceGaps } from '../policies/acceptance-evaluator.js';
-import { evaluateConstraints, summarizeResults } from '../policies/constraint-evaluator.js';
-import type { Constraint, EvidenceInput } from '@sibeaver/core';
-import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene } from '../gap/engine.js';
-import { BomSnapshot, EvidenceItemInput, WaiverInput } from '@sibeaver/core';
+import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene, signWaiversByCondition } from '../gap/engine.js';
+import { BomBaselineInput, EvidenceReportInput, WaiverInput, type BomConstraint } from '@sibeaver/core';
 
 // ============================================================
 // 操作处理器注册表（导出供 direct-mode 调用方使用）
@@ -257,25 +254,10 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     return json(c, await currentBlockers(getCtx(slug)));
   });
 
-  app.get('/:project/api/v1/requirements/:id/gap', async (c) => {
-    const slug = c.req.param('project');
-    const id = c.req.param('id');
-    try {
-      return json(c, await evaluateAcceptanceGap(getCtx(slug), id));
-    } catch (e: any) {
-      return json(c, { error: e.message }, 404);
-    }
-  });
-
   app.get('/:project/api/v1/gaps', async (c) => {
     const slug = c.req.param('project');
-    const ledger = await listGaps(getCtx(slug));
-    if (ledger.bom_commit === null) {
-      // 未设基准：回退旧验收对账（内存计算），便于基准落地前过渡
-      const gaps = await evaluateAllAcceptanceGaps(getCtx(slug));
-      return json(c, { ...ledger, acceptance_gaps: gaps });
-    }
-    return json(c, ledger);
+    // 判定只有一处（r-gd6f）：恒返认知引擎统一计算的账本，无回退分支
+    return json(c, await listGaps(getCtx(slug)));
   });
 
   app.get('/:project/api/v1/gap/baseline', async (c) => {
@@ -287,18 +269,46 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
 
   app.post('/:project/api/v1/gap/baseline', async (c) => {
     const slug = c.req.param('project');
-    const parsed = BomSnapshot.safeParse(await c.req.json());
+    const parsed = BomBaselineInput.safeParse(await c.req.json());
     if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    return json(c, await setBaseline(getCtx(slug), parsed.data));
+    try {
+      return json(c, await setBaseline(getCtx(slug), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, 400);
+    }
   });
 
   app.post('/:project/api/v1/gap/evidence', async (c) => {
     const slug = c.req.param('project');
     const body = await c.req.json();
-    const parsed = EvidenceItemInput.array().safeParse(body.items ?? []);
+    // items 逐项规范化（camelCase 别名），payload 原样传递
+    const itemsRaw = Array.isArray(body.items) ? body.items : [];
+    const items = itemsRaw.map((it: any) => ({
+      source_id: it.source_id ?? it.sourceId,
+      payload: it.payload,
+      reported_at: it.reported_at ?? it.reportedAt,
+      baseline_commit: it.baseline_commit ?? it.baselineCommit,
+    }));
+    const constraints = body.constraints !== undefined
+      ? (camelToSnake(body.constraints) as BomConstraint[])
+      : undefined;
+    const commit = body.commit ?? undefined;
+    const parsed = EvidenceReportInput.safeParse({ items, ...(constraints !== undefined ? { constraints } : {}), ...(commit !== undefined ? { commit } : {}) });
     if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
     try {
-      return json(c, await reportEvidence(getCtx(slug), parsed.data));
+      const ctx = getCtx(slug);
+      // constraints 分区先并入基线（同 commit 语义；commit 与基线不同即基线前移 r-vb4d）
+      if (constraints !== undefined) {
+        const baseline = await ctx.gap.getBaseline();
+        if (!baseline && commit === undefined) {
+          return json(c, { error: '无基线时上报 constraints 分区需携带 commit' }, 400);
+        }
+        await setBaseline(ctx, {
+          commit: commit ?? baseline?.bom_commit ?? '',
+          constraints,
+        });
+      }
+      return json(c, await reportEvidence(ctx, parsed.data));
     } catch (e: any) {
       return json(c, { error: e.message }, 409);
     }
@@ -308,12 +318,11 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const slug = c.req.param('project');
     const parsed = WaiverInput.safeParse(camelToSnake(await c.req.json()));
     if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    await getCtx(slug).gap.upsertWaiver({
-      fingerprint: parsed.data.fingerprint,
-      reason: parsed.data.reason,
-      expires_at: parsed.data.expires_at ?? null,
-      created_at: new Date().toISOString(),
-    });
+    // fingerprint 字段即 condition_fingerprint：按 open 行反查，每行存 (条件指纹+证据源) 键的豁免
+    const count = await signWaiversByCondition(
+      getCtx(slug), parsed.data.fingerprint, parsed.data.reason, parsed.data.expires_at ?? null,
+    );
+    if (count === 0) return json(c, { error: '无匹配的 open 差距行' }, 404);
     return json(c, { ok: true });
   });
 
@@ -324,6 +333,13 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     return json(c, await buildEvidenceScene(getCtx(slug), key));
   });
 
+  app.get('/:project/api/v1/gap/evidence/history', async (c) => {
+    const slug = c.req.param('project');
+    const sourceId = c.req.query('source_id') ?? c.req.query('sourceId');
+    if (!sourceId) return json(c, { error: '缺少 source_id' }, 400);
+    return json(c, await getCtx(slug).gap.getEvidenceHistory(sourceId));
+  });
+
   app.post('/:project/api/v1/gap/reconcile', async (c) => {
     const slug = c.req.param('project');
     try {
@@ -331,15 +347,6 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     } catch (e: any) {
       return json(c, { error: e.message }, 409);
     }
-  });
-
-  app.post('/:project/api/v1/constraints/evaluate', async (c) => {
-    const slug = c.req.param('project');
-    const body = await c.req.json();
-    const constraints = (body.constraints ?? []) as Constraint[];
-    const evidence = (body.evidence ?? {}) as EvidenceInput;
-    const results = await evaluateConstraints(constraints, evidence, getCtx(slug));
-    return json(c, { results, summary: summarizeResults(results) });
   });
 
   app.get('/:project/api/v1/helm', async (c) => {

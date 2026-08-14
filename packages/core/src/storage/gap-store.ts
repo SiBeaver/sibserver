@@ -1,6 +1,7 @@
 import type { Sql } from './db.js';
 import type {
   BomSnapshot,
+  EvidenceLogRecord,
   EvidenceRecord,
   GapRowRecord,
   WaiverRecord,
@@ -50,15 +51,24 @@ export class GapStore {
   // ── 证据 ──────────────────────────────────────────────────
 
   async upsertEvidence(record: EvidenceRecord): Promise<void> {
-    await this.sql`
-      INSERT INTO gap_evidence (project_id, source_id, payload, fingerprint, reported_at)
-      VALUES (${this.projectId}, ${record.source_id}, ${JSON.stringify(record.payload)},
-              ${record.fingerprint}, ${record.reported_at})
-      ON CONFLICT (project_id, source_id) DO UPDATE SET
-        payload = excluded.payload,
-        fingerprint = excluded.fingerprint,
-        reported_at = excluded.reported_at
-    `;
+    await this.sql.begin(async (tx) => {
+      await tx`
+        INSERT INTO gap_evidence (project_id, source_id, payload, fingerprint, reported_at, baseline_commit)
+        VALUES (${this.projectId}, ${record.source_id}, ${JSON.stringify(record.payload)},
+                ${record.fingerprint}, ${record.reported_at}, ${record.baseline_commit ?? null})
+        ON CONFLICT (project_id, source_id) DO UPDATE SET
+          payload = excluded.payload,
+          fingerprint = excluded.fingerprint,
+          reported_at = excluded.reported_at,
+          baseline_commit = excluded.baseline_commit
+      `;
+      await tx`
+        INSERT INTO gap_evidence_log (project_id, source_id, payload, fingerprint, reported_at, baseline_commit, created_at)
+        VALUES (${this.projectId}, ${record.source_id}, ${JSON.stringify(record.payload)},
+                ${record.fingerprint}, ${record.reported_at}, ${record.baseline_commit ?? null},
+                ${new Date().toISOString()})
+      `;
+    });
   }
 
   async getEvidence(sourceId: string): Promise<EvidenceRecord | null> {
@@ -72,6 +82,7 @@ export class GapStore {
       payload: parseJson(rows[0].payload),
       fingerprint: rows[0].fingerprint,
       reported_at: rows[0].reported_at,
+      baseline_commit: rows[0].baseline_commit ?? null,
     };
   }
 
@@ -84,6 +95,26 @@ export class GapStore {
       payload: parseJson(r.payload),
       fingerprint: r.fingerprint,
       reported_at: r.reported_at,
+      baseline_commit: r.baseline_commit ?? null,
+    }));
+  }
+
+  /** 证据上报留痕（append-only log，按 created_at 倒序） */
+  async getEvidenceHistory(sourceId: string): Promise<EvidenceLogRecord[]> {
+    const rows = await this.sql`
+      SELECT id, source_id, payload, fingerprint, reported_at, baseline_commit, created_at
+      FROM gap_evidence_log
+      WHERE project_id = ${this.projectId} AND source_id = ${sourceId}
+      ORDER BY created_at DESC
+    `;
+    return rows.map(r => ({
+      id: Number(r.id),
+      source_id: r.source_id,
+      payload: parseJson(r.payload),
+      fingerprint: r.fingerprint,
+      reported_at: r.reported_at,
+      baseline_commit: r.baseline_commit ?? null,
+      created_at: r.created_at,
     }));
   }
 
@@ -92,12 +123,13 @@ export class GapStore {
   async insertRow(row: GapRowRecord): Promise<void> {
     await this.sql`
       INSERT INTO gap_rows (id, project_id, requirement_key, kind, title, detail, severity,
-                            source_ref, bom_commit, condition_fingerprint, evidence_fingerprint,
+                            source_ref, evidence_source, bom_commit, condition_fingerprint, evidence_fingerprint,
                             status, detected_at, resolved_at, superseded_at)
       VALUES (${row.id}, ${this.projectId}, ${row.requirement_key}, ${row.kind}, ${row.title},
-              ${row.detail}, ${row.severity}, ${row.source_ref}, ${row.bom_commit},
+              ${row.detail}, ${row.severity}, ${row.source_ref}, ${row.evidence_source}, ${row.bom_commit},
               ${row.condition_fingerprint}, ${row.evidence_fingerprint}, ${row.status},
               ${row.detected_at}, ${row.resolved_at}, ${row.superseded_at})
+      ON CONFLICT (project_id, requirement_key, kind, evidence_source) WHERE status = 'open' DO NOTHING
     `;
   }
 

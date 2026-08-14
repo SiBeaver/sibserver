@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS gap_rows (
   detail TEXT NOT NULL DEFAULT '',
   severity TEXT NOT NULL,
   source_ref TEXT NOT NULL,
+  evidence_source TEXT NOT NULL DEFAULT '',
   bom_commit TEXT NOT NULL,
   condition_fingerprint TEXT NOT NULL,
   evidence_fingerprint TEXT,
@@ -143,14 +144,62 @@ CREATE TABLE IF NOT EXISTS gap_rows (
 CREATE INDEX IF NOT EXISTS idx_gap_rows_status ON gap_rows(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_gap_rows_key ON gap_rows(project_id, requirement_key);
 
+-- 身份三元组 (project, requirement_key, kind, evidence_source) 幂等迁移：
+-- 1) 加列 2) 回填 evidence_source='' 的行 3) open 行去重（保留 detected_at 最早/id 最小）4) 部分唯一索引
+DO $$
+BEGIN
+  ALTER TABLE gap_rows ADD COLUMN IF NOT EXISTS evidence_source TEXT NOT NULL DEFAULT '';
+
+  UPDATE gap_rows SET evidence_source = 'constraint:' || source_ref
+    WHERE evidence_source = '' AND kind = 'violation';
+  UPDATE gap_rows SET evidence_source = 'sibom-tags:' || source_ref
+    WHERE evidence_source = '' AND kind = 'absence' AND source_ref ~ '^r-[a-z0-9]{4}$';
+  UPDATE gap_rows SET evidence_source = 'constraint:' || source_ref
+    WHERE evidence_source = '' AND kind = 'absence';
+  UPDATE gap_rows SET evidence_source = source_ref
+    WHERE evidence_source = '' AND kind = 'staleness' AND source_ref LIKE '@%';
+  UPDATE gap_rows SET evidence_source = 'constraint:' || source_ref
+    WHERE evidence_source = '' AND kind = 'staleness' AND title LIKE '约束%';
+  UPDATE gap_rows SET evidence_source = 'node:' || source_ref
+    WHERE evidence_source = '' AND kind = 'staleness' AND title LIKE 'sibs 需求节点%';
+  UPDATE gap_rows SET evidence_source = 'witem:' || source_ref
+    WHERE evidence_source = '' AND kind = 'staleness' AND title LIKE '在办 witem%';
+  UPDATE gap_rows SET evidence_source = source_ref
+    WHERE evidence_source = '' AND kind = 'staleness';
+
+  DELETE FROM gap_rows a USING gap_rows b
+    WHERE a.project_id = b.project_id AND a.requirement_key = b.requirement_key
+      AND a.kind = b.kind AND a.evidence_source = b.evidence_source
+      AND a.status = 'open' AND b.status = 'open'
+      AND (a.detected_at > b.detected_at OR (a.detected_at = b.detected_at AND a.id > b.id));
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_gap_rows_open_identity
+    ON gap_rows(project_id, requirement_key, kind, evidence_source) WHERE status = 'open';
+END $$;
+
 CREATE TABLE IF NOT EXISTS gap_evidence (
   project_id TEXT NOT NULL REFERENCES projects(slug),
   source_id TEXT NOT NULL,
   payload JSONB NOT NULL,
   fingerprint TEXT NOT NULL,
   reported_at TEXT NOT NULL,
+  baseline_commit TEXT,
   PRIMARY KEY (project_id, source_id)
 );
+ALTER TABLE gap_evidence ADD COLUMN IF NOT EXISTS baseline_commit TEXT;
+
+-- 证据上报 append-only 留痕（r-el3c：基线前移后旧版本关联可查）
+CREATE TABLE IF NOT EXISTS gap_evidence_log (
+  id BIGSERIAL PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  source_id TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  fingerprint TEXT NOT NULL,
+  reported_at TEXT NOT NULL,
+  baseline_commit TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gap_evidence_log_source ON gap_evidence_log(project_id, source_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS gap_waivers (
   project_id TEXT NOT NULL REFERENCES projects(slug),

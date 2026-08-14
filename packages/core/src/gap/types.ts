@@ -41,6 +41,15 @@ export const BomSnapshot = z.object({
 });
 export type BomSnapshot = z.infer<typeof BomSnapshot>;
 
+// 分区上报载荷：requirements/constraints 可缺省——缺省分区沿用旧基线值；
+// 首次上报（无旧基线）时缺任一分区由引擎拒绝（400）。
+export const BomBaselineInput = z.object({
+  commit: z.string(),
+  requirements: z.array(BomRequirement).optional(),
+  constraints: z.array(BomConstraint).optional(),
+});
+export type BomBaselineInput = z.infer<typeof BomBaselineInput>;
+
 // ── 账本行 ──────────────────────────────────────────────────
 
 export interface GapRowRecord {
@@ -51,6 +60,8 @@ export interface GapRowRecord {
   detail: string;
   severity: string;
   source_ref: string;
+  /** 身份三元组之证据源——constraint:{id} / sibom-tags:{ruleId} / @bom:{key} / @sibom:{ruleId} / node:{id} / witem:{id} */
+  evidence_source: string;
   bom_commit: string;
   condition_fingerprint: string;
   evidence_fingerprint: string | null;
@@ -70,14 +81,36 @@ export const EvidenceItemInput = z.object({
   source_id: z.string(),
   payload: z.unknown(),
   reported_at: z.string().optional(),
+  /** 观测对照的基线 commit（r-el3c）；缺省取当前基线 */
+  baseline_commit: z.string().optional(),
 });
 export type EvidenceItemInput = z.infer<typeof EvidenceItemInput>;
+
+/** 证据上报载荷（r-gl5e）：constraints 分区先并入基线再重算 */
+export const EvidenceReportInput = z.object({
+  items: z.array(EvidenceItemInput),
+  constraints: z.array(BomConstraint).optional(),
+  commit: z.string().optional(),
+});
+export type EvidenceReportInput = z.infer<typeof EvidenceReportInput>;
 
 export interface EvidenceRecord {
   source_id: string;
   payload: unknown;
   fingerprint: string;
   reported_at: string;
+  baseline_commit: string | null;
+}
+
+/** gap_evidence_log 行（append-only 留痕，r-el3c） */
+export interface EvidenceLogRecord {
+  id: number;
+  source_id: string;
+  payload: unknown;
+  fingerprint: string;
+  reported_at: string;
+  baseline_commit: string | null;
+  created_at: string;
 }
 
 // ── 豁免 ────────────────────────────────────────────────────

@@ -5,10 +5,11 @@ import type { RequirementNode, WitemNode } from '@sibeaver/core';
 import type { EvidenceInput, PatternResult } from '@sibeaver/core';
 import { evaluateConstraint } from '../policies/constraint-evaluator.js';
 import type {
+  BomBaselineInput,
   BomSnapshot,
   BomConstraint,
   BomRequirement,
-  EvidenceItemInput,
+  EvidenceReportInput,
   EvidenceScene,
   GapRowRecord,
   GapView,
@@ -35,12 +36,14 @@ interface DesiredGap {
   detail: string;
   severity: string;
   source_ref: string;
+  /** 身份三元组之证据源（r-gl3c）：constraint:{id} / sibom-tags:{ruleId} / @bom:{key} / @sibom:{ruleId} / node:{id} / witem:{id} */
+  evidence_source: string;
   condition_fingerprint: string;
   evidence_fingerprint: string | null;
 }
 
-function identityOf(g: Pick<DesiredGap, 'requirement_key' | 'kind' | 'source_ref'>): string {
-  return `${g.requirement_key}\u0000${g.kind}\u0000${g.source_ref}`;
+function identityOf(g: Pick<DesiredGap, 'requirement_key' | 'kind' | 'evidence_source'>): string {
+  return `${g.requirement_key}\u0000${g.kind}\u0000${g.evidence_source}`;
 }
 
 function constraintKey(c: BomConstraint): string {
@@ -49,14 +52,23 @@ function constraintKey(c: BomConstraint): string {
 
 // ── 三源计算（纯函数部分 + sibs_query/witem 读图谱）─────────────
 
+/** 重算范围（r-gl5e 增量演化）：ruleKeys 控 Step 1 规则认领、constraintKeys 控 Step 2 约束评估；staleness 恒全量（廉价）。null=全量，空 Set=不重算该类。 */
+export interface ReconcileScope {
+  ruleKeys: Set<string> | null;
+  constraintKeys: Set<string> | null;
+}
+
+const FULL_SCOPE: ReconcileScope = { ruleKeys: null, constraintKeys: null };
+
 async function computeDesiredGaps(
   ctx: OperationContext,
   bom: BomSnapshot,
-  scope: Set<string> | null,
+  scope: ReconcileScope,
 ): Promise<DesiredGap[]> {
   const gaps: DesiredGap[] = [];
   const bomKeys = new Set(bom.requirements.map(r => r.key));
-  const inScope = (key: string) => scope === null || scope.has(key);
+  const ruleInScope = (key: string) => scope.ruleKeys === null || scope.ruleKeys.has(key);
+  const constraintInScope = (key: string) => scope.constraintKeys === null || scope.constraintKeys.has(key);
 
   // Step 1: 规则认领对账 → 缺失（BOM 业务规则无人 @sibom 认领）
   const sibomEv = await ctx.gap.getEvidence('sibom-tags');
@@ -64,7 +76,7 @@ async function computeDesiredGaps(
     (sibomEv?.payload as { rules?: Array<{ id: string }> } | undefined)?.rules?.map(r => r.id) ?? [],
   );
   for (const req of bom.requirements) {
-    if (!inScope(req.key)) continue;
+    if (!ruleInScope(req.key)) continue;
     for (const rule of req.rules ?? []) {
       if (claimedRules.has(rule.id)) continue;
       gaps.push({
@@ -74,6 +86,7 @@ async function computeDesiredGaps(
         detail: 'BOM 业务规则没有 @sibom 认领（代码未自报归属）',
         severity: 'medium',
         source_ref: rule.id,
+        evidence_source: `sibom-tags:${rule.id}`,
         condition_fingerprint: fingerprint({ t: 'rule', key: req.key, rule: rule.id, title: rule.title }),
         evidence_fingerprint: sibomEv?.fingerprint ?? null,
       });
@@ -83,7 +96,7 @@ async function computeDesiredGaps(
   // Step 2: 约束 vs 证据 → 违约 / 缺失
   for (const constraint of bom.constraints) {
     const key = constraintKey(constraint);
-    if (!inScope(key)) continue;
+    if (!constraintInScope(key)) continue;
     if (key !== GLOBAL_KEY && !bomKeys.has(key)) continue; // 键失配 → Step 3 staleness
     const ev = await ctx.gap.getEvidence(`constraint:${constraint.id}`);
     const evidence = buildEvidenceInput(constraint, ev?.payload);
@@ -98,6 +111,7 @@ async function computeDesiredGaps(
         detail: result.message,
         severity: constraint.severity,
         source_ref: constraint.id,
+        evidence_source: `constraint:${constraint.id}`,
         condition_fingerprint: conditionFp,
         evidence_fingerprint: ev?.fingerprint ?? null,
       });
@@ -109,6 +123,7 @@ async function computeDesiredGaps(
         detail: `期望: ${result.expected}, 实际: ${result.message}`,
         severity: constraint.severity,
         source_ref: constraint.id,
+        evidence_source: `constraint:${constraint.id}`,
         condition_fingerprint: conditionFp,
         evidence_fingerprint: ev?.fingerprint ?? fingerprint(result.actual_value),
       });
@@ -126,6 +141,7 @@ async function computeDesiredGaps(
         detail: `constraint ${constraint.id} → ${key} 不在 BOM 中`,
         severity: constraint.severity,
         source_ref: constraint.id,
+        evidence_source: `constraint:${constraint.id}`,
         condition_fingerprint: fingerprint({ t: 'stale-constraint', id: constraint.id, key }),
         evidence_fingerprint: null,
       });
@@ -144,6 +160,7 @@ async function computeDesiredGaps(
       detail: `node ${node.id} → ${key}`,
       severity: 'medium',
       source_ref: node.id,
+      evidence_source: `node:${node.id}`,
       condition_fingerprint: fingerprint({ t: 'stale-node', id: node.id, key }),
       evidence_fingerprint: null,
     });
@@ -167,6 +184,7 @@ async function computeDesiredGaps(
         detail: files.join(', '),
         severity: 'medium',
         source_ref: `@bom:${key}`,
+        evidence_source: `@bom:${key}`,
         condition_fingerprint: fingerprint({ t: 'stale-tag', key }),
         evidence_fingerprint: fingerprint(files),
       });
@@ -191,6 +209,7 @@ async function computeDesiredGaps(
         detail: `${ruleId} — ${files.join(', ')}`,
         severity: 'medium',
         source_ref: `@sibom:${ruleId}`,
+        evidence_source: `@sibom:${ruleId}`,
         condition_fingerprint: fingerprint({ t: 'stale-sibom', rule: ruleId }),
         evidence_fingerprint: fingerprint(files),
       });
@@ -212,6 +231,7 @@ async function computeDesiredGaps(
         detail: `witem ${witem.id} → requirement ${target.id} → ${key}`,
         severity: 'medium',
         source_ref: witem.id,
+        evidence_source: `witem:${witem.id}`,
         condition_fingerprint: fingerprint({ t: 'stale-witem', id: witem.id, key }),
         evidence_fingerprint: null,
       });
@@ -245,7 +265,7 @@ export interface ReconcileResult {
 
 export async function reconcile(
   ctx: OperationContext,
-  scope: Set<string> | null = null,
+  scope: ReconcileScope = FULL_SCOPE,
   now: string = new Date().toISOString(),
 ): Promise<ReconcileResult> {
   const baseline = await ctx.gap.getBaseline();
@@ -253,9 +273,16 @@ export async function reconcile(
 
   const desired = await computeDesiredGaps(ctx, baseline.bom, scope);
   const openRows = await ctx.gap.getOpenRows();
-  const scopedRows = openRows.filter(r =>
-    (scope === null || scope.has(r.requirement_key) || r.kind === 'staleness'),
-  );
+  const scopedRows = openRows.filter(r => {
+    if (r.kind === 'staleness') return true;
+    if (r.evidence_source.startsWith('sibom-tags:')) {
+      return scope.ruleKeys === null || scope.ruleKeys.has(r.requirement_key);
+    }
+    if (r.evidence_source.startsWith('constraint:')) {
+      return scope.constraintKeys === null || scope.constraintKeys.has(r.requirement_key);
+    }
+    return scope.ruleKeys === null && scope.constraintKeys === null;
+  });
 
   const desiredByIdentity = new Map(desired.map(g => [identityOf(g), g]));
   const existingByIdentity = new Map(scopedRows.map(r => [identityOf(r), r]));
@@ -295,7 +322,7 @@ export async function reconcile(
   return result;
 }
 
-// ── 基准前移（push master 即定稿 → 增量 rebase）──────────────
+// ── 基准推进（push master 即定稿 → 增量 rebase；支持分区合并 r-vb4d）──
 
 export interface BaselineResult extends ReconcileResult {
   changed_keys: string[];
@@ -304,22 +331,37 @@ export interface BaselineResult extends ReconcileResult {
 
 export async function setBaseline(
   ctx: OperationContext,
-  bom: BomSnapshot,
+  input: BomBaselineInput,
   now: string = new Date().toISOString(),
 ): Promise<BaselineResult> {
   const old = await ctx.gap.getBaseline();
-  await ctx.gap.setBaseline(bom, now);
 
   if (!old) {
-    const r = await reconcile(ctx, null, now);
+    // 首次上报：缺省分区视为空分区——sync（requirements）与采集器（constraints）任一先到均可建基线，
+    // 另一分区随后续同 commit 分区合并补齐（r-vb4d）
+    const bom: BomSnapshot = {
+      commit: input.commit,
+      requirements: input.requirements ?? [],
+      constraints: input.constraints ?? [],
+    };
+    await ctx.gap.setBaseline(bom, now);
+    const r = await reconcile(ctx, FULL_SCOPE, now);
     return { ...r, changed_keys: bom.requirements.map(x => x.key), superseded: 0 };
   }
+
+  // 已有旧基线：分区合并（缺省分区沿用旧值）；commit 相同 = 同 commit 分区合并（幂等），不同 = 基线前移
+  const bom: BomSnapshot = {
+    commit: input.commit,
+    requirements: input.requirements ?? old.bom.requirements,
+    constraints: input.constraints ?? old.bom.constraints,
+  };
+  await ctx.gap.setBaseline(bom, now);
 
   const changedKeys = diffBomKeys(old.bom, bom);
   const openBefore = await ctx.gap.getOpenRows();
   const superseded = openBefore.filter(r => changedKeys.has(r.requirement_key)).length;
   await ctx.gap.supersedeRowsByKeys([...changedKeys], now);
-  const r = await reconcile(ctx, changedKeys, now);
+  const r = await reconcile(ctx, { ruleKeys: changedKeys, constraintKeys: changedKeys }, now);
   return { ...r, changed_keys: [...changedKeys].sort(), superseded };
 }
 
@@ -353,7 +395,7 @@ function diffBomKeys(oldBom: BomSnapshot, newBom: BomSnapshot): Set<string> {
   return changed;
 }
 
-// ── 证据上报（推，不是拉）────────────────────────────────────
+// ── 证据上报（推，不是拉；增量重算 r-gl5e）────────────────────
 
 export interface EvidenceReportResult extends ReconcileResult {
   accepted: number;
@@ -362,13 +404,15 @@ export interface EvidenceReportResult extends ReconcileResult {
 
 export async function reportEvidence(
   ctx: OperationContext,
-  items: EvidenceItemInput[],
+  input: EvidenceReportInput,
   now: string = new Date().toISOString(),
 ): Promise<EvidenceReportResult> {
   const baseline = await ctx.gap.getBaseline();
   if (!baseline) throw new Error('未设基准——请先上报 BOM 快照');
 
+  const items = input.items;
   const affectedKeys = new Set<string>();
+  let sibomChanged = false;
   let accepted = 0;
   let skipped = 0;
 
@@ -388,13 +432,16 @@ export async function reportEvidence(
       payload: item.payload,
       fingerprint: fp,
       reported_at: item.reported_at ?? now,
+      baseline_commit: item.baseline_commit ?? baseline.bom_commit,
     });
     accepted++;
+    // 增量（r-gl5e）：constraint 项标键重算该约束；sibom-tags 项重算全部规则认领；
+    // bom-tags 项只影响 staleness（恒全量）。staleness 恒全量，无需标键。
     const constraintMatch = item.source_id.match(/^constraint:(.+)$/);
     if (constraintMatch) {
       affectedKeys.add(constraintByIdKey.get(constraintMatch[1]) ?? GLOBAL_KEY);
     }
-    // bom-tags / sibom-tags 等其他证据源影响 staleness 与规则认领，reconcile 时始终全量重查
+    if (item.source_id === 'sibom-tags') sibomChanged = true;
   }
 
   if (accepted === 0) {
@@ -405,7 +452,11 @@ export async function reportEvidence(
     };
   }
 
-  const r = await reconcile(ctx, affectedKeys.size > 0 ? affectedKeys : null, now);
+  const scope: ReconcileScope = {
+    ruleKeys: sibomChanged ? null : new Set<string>(),
+    constraintKeys: affectedKeys.size > 0 ? affectedKeys : new Set<string>(),
+  };
+  const r = await reconcile(ctx, scope, now);
   return { ...r, accepted, skipped };
 }
 
@@ -430,17 +481,19 @@ export async function listGaps(ctx: OperationContext): Promise<{
   const reportedAtBySource = new Map(
     (await ctx.gap.getAllEvidence()).map(ev => [ev.source_id, ev.reported_at]),
   );
-  const constraintIds = new Set((baseline?.bom.constraints ?? []).map(c => c.id));
 
   const gaps: GapView[] = rows.map(row => {
-    const waiver = activeWaivers.get(row.condition_fingerprint) ?? null;
+    // 豁免指纹 = 条件指纹 + 证据源哈希（r-gd7g：判定依据或证据来源变化 → 指纹变 → 豁免失效）
+    const waiverKey = fingerprint({ condition_fingerprint: row.condition_fingerprint, evidence_source: row.evidence_source });
+    const waiver = activeWaivers.get(waiverKey) ?? null;
+    const evidenceSourceId = evidenceSourceIdOf(row);
     return {
       ...row,
       in_progress_witem: witemByKey.get(row.requirement_key) ?? null,
       waiver: waiver ? { reason: waiver.reason, expires_at: waiver.expires_at } : null,
-      evidence_reported_at: row.evidence_fingerprint === null
-        ? null
-        : reportedAtBySource.get(evidenceSourceIdOf(row, constraintIds)) ?? null,
+      evidence_reported_at: evidenceSourceId
+        ? reportedAtBySource.get(evidenceSourceId) ?? null
+        : null,
     };
   });
 
@@ -458,10 +511,33 @@ export async function listGaps(ctx: OperationContext): Promise<{
 }
 
 /** 由差距行反推证据 source_id（引擎私有知识，不外泄到观察窗）。 */
-function evidenceSourceIdOf(row: GapRowRecord, constraintIds: Set<string>): string {
-  if (row.source_ref.startsWith('@bom:')) return 'bom-tags';
-  if (constraintIds.has(row.source_ref)) return `constraint:${row.source_ref}`;
-  return 'sibom-tags';
+function evidenceSourceIdOf(row: GapRowRecord): string | null {
+  if (row.evidence_source.startsWith('constraint:')) return row.evidence_source;
+  if (row.evidence_source.startsWith('sibom-tags')) return 'sibom-tags';
+  if (row.evidence_source.startsWith('@bom:')) return 'bom-tags';
+  // node:/witem:/@sibom: 等无上报时间
+  return null;
+}
+
+/** 豁免签约（r-gd7g）：按 condition_fingerprint 反查 open 行，对每行存 (条件指纹+证据源) 哈希键的豁免。返回命中行数。 */
+export async function signWaiversByCondition(
+  ctx: OperationContext,
+  conditionFingerprint: string,
+  reason: string,
+  expiresAt: string | null,
+): Promise<number> {
+  const rows = (await ctx.gap.getOpenRows())
+    .filter(r => r.condition_fingerprint === conditionFingerprint);
+  const createdAt = new Date().toISOString();
+  for (const row of rows) {
+    await ctx.gap.upsertWaiver({
+      fingerprint: fingerprint({ condition_fingerprint: row.condition_fingerprint, evidence_source: row.evidence_source }),
+      reason,
+      expires_at: expiresAt,
+      created_at: createdAt,
+    });
+  }
+  return rows.length;
 }
 
 // ── 对照视图证据聚合（目检数据，不产差距条目）─────────────────
