@@ -48,8 +48,8 @@ export class NodeStore {
     await this.sql`
       INSERT INTO nodes (id, project_id, type, title, description, status, tags, created_at, updated_at, metadata, data, content, parent_id, pinned, sort_order)
       VALUES (${id}, ${this.projectId}, ${type}, ${title ?? ''}, ${description ?? ''}, ${status},
-              ${JSON.stringify(tags ?? [])}, ${created_at}, ${updated_at},
-              ${JSON.stringify(metadata ?? {})}, ${JSON.stringify(data)},
+              ${this.sql.json(tags ?? [])}, ${created_at}, ${updated_at},
+              ${this.sql.json(metadata ?? {})}, ${this.sql.json(data)},
               ${content ?? ''}, ${parent_id ?? null}, ${pinned ?? false}, ${sort_order ?? 0})
     `;
   }
@@ -59,8 +59,8 @@ export class NodeStore {
     await this.sql`
       UPDATE nodes SET
         title = ${title ?? ''}, description = ${description ?? ''}, status = ${status},
-        tags = ${JSON.stringify(tags ?? [])}, updated_at = ${updated_at},
-        metadata = ${JSON.stringify(metadata ?? {})}, data = ${JSON.stringify(data)},
+        tags = ${this.sql.json(tags ?? [])}, updated_at = ${updated_at},
+        metadata = ${this.sql.json(metadata ?? {})}, data = ${this.sql.json(data)},
         content = ${content ?? ''}, parent_id = ${parent_id ?? null},
         pinned = ${pinned ?? false}, sort_order = ${sort_order ?? 0},
         embedding = NULL
@@ -221,7 +221,7 @@ export class EventStore {
       INSERT INTO events (id, project_id, timestamp, event_type, actor, operation, node_id, node_type, payload, diff, context)
       VALUES (${e.id}, ${this.projectId}, ${e.timestamp}, ${e.event_type}, ${e.actor ?? 'user'},
               ${e.operation}, ${e.node_id ?? null}, ${e.node_type ?? null},
-              ${JSON.stringify(e.payload ?? {})}, ${e.diff ? JSON.stringify(e.diff) : null}, ${e.context ?? null})
+              ${this.sql.json(e.payload ?? {})}, ${e.diff ? this.sql.json(e.diff) : null}, ${e.context ?? null})
     `;
   }
 

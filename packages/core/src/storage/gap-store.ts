@@ -1,4 +1,4 @@
-import type { Sql } from './db.js';
+import type { Sql, JsonbParam } from './db.js';
 import type {
   BomSnapshot,
   EvidenceLogRecord,
@@ -40,7 +40,7 @@ export class GapStore {
   async setBaseline(bom: BomSnapshot, updatedAt: string): Promise<void> {
     await this.sql`
       INSERT INTO gap_baseline (project_id, bom_commit, bom, updated_at)
-      VALUES (${this.projectId}, ${bom.commit}, ${JSON.stringify(bom)}, ${updatedAt})
+      VALUES (${this.projectId}, ${bom.commit}, ${this.sql.json(bom)}, ${updatedAt})
       ON CONFLICT (project_id) DO UPDATE SET
         bom_commit = excluded.bom_commit,
         bom = excluded.bom,
@@ -54,7 +54,7 @@ export class GapStore {
     await this.sql.begin(async (tx) => {
       await tx`
         INSERT INTO gap_evidence (project_id, source_id, payload, fingerprint, reported_at, baseline_commit)
-        VALUES (${this.projectId}, ${record.source_id}, ${JSON.stringify(record.payload)},
+        VALUES (${this.projectId}, ${record.source_id}, ${tx.json(record.payload as JsonbParam)},
                 ${record.fingerprint}, ${record.reported_at}, ${record.baseline_commit ?? null})
         ON CONFLICT (project_id, source_id) DO UPDATE SET
           payload = excluded.payload,
@@ -64,7 +64,7 @@ export class GapStore {
       `;
       await tx`
         INSERT INTO gap_evidence_log (project_id, source_id, payload, fingerprint, reported_at, baseline_commit, created_at)
-        VALUES (${this.projectId}, ${record.source_id}, ${JSON.stringify(record.payload)},
+        VALUES (${this.projectId}, ${record.source_id}, ${tx.json(record.payload as JsonbParam)},
                 ${record.fingerprint}, ${record.reported_at}, ${record.baseline_commit ?? null},
                 ${new Date().toISOString()})
       `;

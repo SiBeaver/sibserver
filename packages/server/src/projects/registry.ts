@@ -1,4 +1,4 @@
-import type { Sql } from '../index.js';
+import type { Sql, JsonbParam } from '../index.js';
 import type { ProjectMeta, CreateProjectInput, UpdateProjectInput } from './types.js';
 
 // ============================================================
@@ -12,7 +12,7 @@ export class Registry {
     const now = new Date().toISOString();
     const rows = await this.sql`
       INSERT INTO projects (slug, name, description, created_at, updated_at, metadata)
-      VALUES (${input.slug}, ${input.name}, ${input.description ?? ''}, ${now}, ${now}, ${JSON.stringify(input.metadata ?? {})})
+      VALUES (${input.slug}, ${input.name}, ${input.description ?? ''}, ${now}, ${now}, ${this.sql.json((input.metadata ?? {}) as JsonbParam)})
       RETURNING *
     `;
     return rowToMeta(rows[0]);
@@ -43,7 +43,7 @@ export class Registry {
 
     const rows = await this.sql`
       UPDATE projects SET name = ${name}, description = ${description},
-        updated_at = ${now}, metadata = ${JSON.stringify(metadata)}
+        updated_at = ${now}, metadata = ${this.sql.json(metadata as JsonbParam)}
       WHERE slug = ${slug}
       RETURNING *
     `;

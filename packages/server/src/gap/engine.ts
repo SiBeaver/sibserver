@@ -29,6 +29,18 @@ export function fingerprint(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+/** 键序无关的稳定序列化——jsonb 往返会重排对象键序，跨 DB 比较相等须按值不按文本 */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 interface DesiredGap {
   requirement_key: string;
   kind: GapRowRecord['kind'];
@@ -371,7 +383,7 @@ function diffBomKeys(oldBom: BomSnapshot, newBom: BomSnapshot): Set<string> {
   const newReqs = new Map(newBom.requirements.map(r => [r.key, r]));
   for (const [key, req] of newReqs) {
     const prev = oldReqs.get(key);
-    if (!prev || JSON.stringify(prev) !== JSON.stringify(req)) changed.add(key);
+    if (!prev || stableStringify(prev) !== stableStringify(req)) changed.add(key);
   }
   for (const key of oldReqs.keys()) {
     if (!newReqs.has(key)) changed.add(key);
@@ -380,7 +392,7 @@ function diffBomKeys(oldBom: BomSnapshot, newBom: BomSnapshot): Set<string> {
     const m = new Map<string, string>();
     for (const c of list) {
       const k = constraintKey(c);
-      m.set(k, (m.get(k) ?? '') + JSON.stringify(c));
+      m.set(k, (m.get(k) ?? '') + stableStringify(c));
     }
     return m;
   };

@@ -4,6 +4,23 @@ import postgres from 'postgres';
 // PostgreSQL 连接池 + Schema 初始化
 // ============================================================
 
+// 历史 JSONB 双层编码归一化（幂等）：旧写入路径对 jsonb 列先 JSON.stringify 再作参数，
+// postgres.js 又编码一次，导致库存 jsonb 字符串；此处还原为结构化 jsonb（写入根因已修复，此块处理存量行）。
+export const JSONB_NORMALIZE_SQL = `
+DO $$
+BEGIN
+  UPDATE nodes SET data = (data #>> '{}')::jsonb WHERE jsonb_typeof(data) = 'string';
+  UPDATE nodes SET tags = (tags #>> '{}')::jsonb WHERE jsonb_typeof(tags) = 'string';
+  UPDATE nodes SET metadata = (metadata #>> '{}')::jsonb WHERE jsonb_typeof(metadata) = 'string';
+  UPDATE events SET payload = (payload #>> '{}')::jsonb WHERE jsonb_typeof(payload) = 'string';
+  UPDATE events SET diff = (diff #>> '{}')::jsonb WHERE jsonb_typeof(diff) = 'string';
+  UPDATE projects SET metadata = (metadata #>> '{}')::jsonb WHERE jsonb_typeof(metadata) = 'string';
+  UPDATE gap_evidence SET payload = (payload #>> '{}')::jsonb WHERE jsonb_typeof(payload) = 'string';
+  UPDATE gap_evidence_log SET payload = (payload #>> '{}')::jsonb WHERE jsonb_typeof(payload) = 'string';
+  UPDATE gap_baseline SET bom = (bom #>> '{}')::jsonb WHERE jsonb_typeof(bom) = 'string';
+END $$;
+`;
+
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS projects (
   slug TEXT PRIMARY KEY,
@@ -209,7 +226,7 @@ CREATE TABLE IF NOT EXISTS gap_waivers (
   created_at TEXT NOT NULL,
   PRIMARY KEY (project_id, fingerprint)
 );
-`;
+` + JSONB_NORMALIZE_SQL;
 
 let _poolPromise: Promise<postgres.Sql> | null = null;
 
@@ -241,3 +258,6 @@ export async function closePool(): Promise<void> {
 }
 
 export type Sql = postgres.Sql;
+
+/** postgres.js jsonb 参数类型（JSONValue）——unknown/宽泛 JSON 来源收窄入参用 */
+export type JsonbParam = Parameters<Sql['json']>[0];

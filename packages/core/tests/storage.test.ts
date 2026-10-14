@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from './helpers/test-db.js';
 import { NodeStore, EdgeStore, EventStore } from '../src/storage/stores.js';
+import { GapStore } from '../src/storage/gap-store.js';
+import { JSONB_NORMALIZE_SQL } from '../src/storage/db.js';
 import type { Sql } from '../src/storage/db.js';
 import { ulid } from 'ulidx';
 import type { WitemNode, Edge, EventRecord } from '../src/index.js';
@@ -155,6 +157,104 @@ describe('Storage Layer', () => {
 
       const byNode = await events.getByNode('test-node-id');
       expect(byNode).toHaveLength(1);
+    });
+  });
+
+  describe('JSONB 编码', () => {
+    it('节点写入后 DB 侧为结构化 jsonb，字段可用 DB 算子直接查询', async () => {
+      const now = new Date().toISOString();
+      const id = ulid();
+      await nodes.insert({
+        id, type: 'witem', title: '编码检查', description: '', status: 'active',
+        tags: ['a', 'b'], created_at: now, updated_at: now, metadata: { k: 'v' },
+        horizon: 'short', success_criteria: ['x'], priority: 'medium',
+      } as WitemNode);
+
+      const [row] = await sql`
+        SELECT jsonb_typeof(data) AS dt, jsonb_typeof(tags) AS tt, jsonb_typeof(metadata) AS mt,
+               data->>'horizon' AS horizon, tags->>0 AS tag0, metadata->>'k' AS kv
+        FROM nodes WHERE id = ${id} AND project_id = ${PROJECT_ID}
+      `;
+      expect(row.dt).toBe('object');
+      expect(row.tt).toBe('array');
+      expect(row.mt).toBe('object');
+      expect(row.horizon).toBe('short');
+      expect(row.tag0).toBe('a');
+      expect(row.kv).toBe('v');
+    });
+
+    it('事件 payload/diff 写入后为结构化 jsonb', async () => {
+      const id = ulid();
+      await events.insert({
+        id, timestamp: new Date().toISOString(), event_type: 'witem.status_changed', actor: 'user',
+        operation: 'update_witem_status', node_id: 'n1', node_type: 'witem',
+        payload: { reason: '完成' },
+        diff: [{ field: 'status', oldValue: 'active', newValue: 'achieved' }],
+        context: '测试',
+      } as EventRecord);
+
+      const [row] = await sql`
+        SELECT jsonb_typeof(payload) AS pt, jsonb_typeof(diff) AS dt,
+               payload->>'reason' AS reason, diff->0->>'field' AS field
+        FROM events WHERE id = ${id} AND project_id = ${PROJECT_ID}
+      `;
+      expect(row.pt).toBe('object');
+      expect(row.dt).toBe('array');
+      expect(row.reason).toBe('完成');
+      expect(row.field).toBe('status');
+    });
+
+    it('gap 证据 payload 写入（含留痕日志）后为结构化 jsonb', async () => {
+      const gaps = new GapStore(sql, PROJECT_ID);
+      await gaps.upsertEvidence({
+        source_id: 'constraint:c1',
+        payload: { ok: true },
+        fingerprint: 'fp1',
+        reported_at: new Date().toISOString(),
+        baseline_commit: null,
+      });
+
+      const [row] = await sql`
+        SELECT jsonb_typeof(payload) AS pt FROM gap_evidence
+        WHERE project_id = ${PROJECT_ID} AND source_id = 'constraint:c1'
+      `;
+      const [logRow] = await sql`
+        SELECT jsonb_typeof(payload) AS pt FROM gap_evidence_log
+        WHERE project_id = ${PROJECT_ID} AND source_id = 'constraint:c1'
+      `;
+      expect(row.pt).toBe('object');
+      expect(logRow.pt).toBe('object');
+    });
+
+    it('历史双层编码行经归一化迁移还原为结构化 jsonb（幂等）', async () => {
+      const now = new Date().toISOString();
+      const legacyId = ulid();
+      // 模拟旧写入路径：stringify 字符串作 jsonb 参数（postgres.js 再编码 → 库存 jsonb 字符串）
+      await sql`
+        INSERT INTO nodes (id, project_id, type, title, description, status, tags, created_at, updated_at, metadata, data)
+        VALUES (${legacyId}, ${PROJECT_ID}, 'knowledge', 'legacy', '', 'tentative',
+                ${JSON.stringify(['t'])}, ${now}, ${now},
+                ${JSON.stringify({})}, ${JSON.stringify({ domain: 'd' })})
+      `;
+      const [before] = await sql`
+        SELECT jsonb_typeof(data) AS dt, jsonb_typeof(tags) AS tt
+        FROM nodes WHERE id = ${legacyId} AND project_id = ${PROJECT_ID}
+      `;
+      expect(before.dt).toBe('string');
+      expect(before.tt).toBe('string');
+
+      await sql.unsafe(JSONB_NORMALIZE_SQL);
+      await sql.unsafe(JSONB_NORMALIZE_SQL);
+
+      const [after] = await sql`
+        SELECT jsonb_typeof(data) AS dt, jsonb_typeof(tags) AS tt,
+               data->>'domain' AS domain, tags->>0 AS tag0
+        FROM nodes WHERE id = ${legacyId} AND project_id = ${PROJECT_ID}
+      `;
+      expect(after.dt).toBe('object');
+      expect(after.tt).toBe('array');
+      expect(after.domain).toBe('d');
+      expect(after.tag0).toBe('t');
     });
   });
 });
