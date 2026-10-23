@@ -23,6 +23,7 @@ import {
 import type { ProjectManager } from '../projects/index.js';
 import { snakeToCamel } from '../api/transforms.js';
 import { listGaps } from '../gap/engine.js';
+import { listWorkpacks } from '../workpack/engine.js';
 
 /** Wrap result: apply camelCase transform + JSON serialize for MCP text output */
 function jsonResult(data: unknown) {
@@ -423,6 +424,11 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await listGaps(getCtx()));
   }));
 
+  server.tool('list_workpacks', '派生工作包：按需求键聚拢开放差距，输出边界契约、依赖、并行组与验收判据（只读）', {
+  }, log('list_workpacks', async () => {
+    return jsonResult(await listWorkpacks(getCtx()));
+  }));
+
   // --- 风险与技术债 ---
   server.tool('identify_risk', '识别一个项目风险', {
     title: z.string().describe('风险标题'),
@@ -743,6 +749,12 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     project: projectParam,
   }, log('evaluate_gap', async ({ project }) => {
     return jsonResult(await listGaps(await ctx(project)));
+  }));
+
+  server.tool('list_workpacks', '派生工作包：按需求键聚拢开放差距，输出边界契约、依赖、并行组与验收判据（只读）', {
+    project: projectParam,
+  }, log('list_workpacks', async ({ project }) => {
+    return jsonResult(await listWorkpacks(await ctx(project)));
   }));
 
   // --- 风险与技术债 ---

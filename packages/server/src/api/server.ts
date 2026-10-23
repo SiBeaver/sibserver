@@ -24,6 +24,7 @@ import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
 import { snakeToCamel, camelToSnake, kebabToSnake, toApiEvent } from './transforms.js';
 import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene, signWaiversByCondition } from '../gap/engine.js';
+import { listWorkpacks } from '../workpack/engine.js';
 import { BomBaselineInput, EvidenceReportInput, WaiverInput, type BomConstraint } from '@sibeaver/core';
 
 // ============================================================
@@ -258,6 +259,11 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const slug = c.req.param('project');
     // 判定只有一处（r-gd6f）：恒返认知引擎统一计算的账本，无回退分支
     return json(c, await listGaps(getCtx(slug)));
+  });
+
+  app.get('/:project/api/v1/workpacks', async (c) => {
+    const slug = c.req.param('project');
+    return json(c, await listWorkpacks(getCtx(slug)));
   });
 
   app.get('/:project/api/v1/gap/baseline', async (c) => {

@@ -12,4 +12,5 @@ export * from './operations/index.js';
 
 // gap & constraint types
 export * from './gap/types.js';
+export * from './workpack/types.js';
 export * from './constraints/types.js';

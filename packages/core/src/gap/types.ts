@@ -26,6 +26,8 @@ export const BomRequirement = z.object({
   key: z.string(),
   title: z.string(),
   rules: z.array(BomRule).default([]),
+  /** 需求依赖（跨域已规范化为 domain/req）；缺省视为无依赖 */
+  deps: z.array(z.string()).optional(),
 });
 export type BomRequirement = z.infer<typeof BomRequirement>;
 
