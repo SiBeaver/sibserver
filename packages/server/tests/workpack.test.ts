@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../core/tests/helpers/test-db.js';
 import { OperationContext } from '@sibeaver/core';
 import type { BomSnapshot, GapRowRecord, Workpack } from '@sibeaver/core';
-import { listWorkpacks } from '../src/workpack/engine.js';
+import {
+  claimWorkpack, listWorkpacks, narrowWorkpackBoundary,
+  releaseWorkpack, renewWorkpack, reportWorkpack, WorkpackError,
+} from '../src/workpack/engine.js';
 
 const NOW = '2026-08-20T00:00:00.000Z';
 
@@ -152,5 +155,154 @@ describe('工作包派生', () => {
     } finally {
       await t.close();
     }
+  });
+});
+
+describe('工作包认领与边界执行', () => {
+  let ctx: OperationContext;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    const t = await createTestDb();
+    ctx = new OperationContext(t.sql, 'default');
+    close = t.close;
+    await ctx.gap.setBaseline(bom(), NOW);
+    await ctx.gap.upsertEvidence({
+      source_id: 'sibom-tags',
+      payload: { rules: [{ id: 'r-aaaa', file: 'src/a/file.ts' }] },
+      fingerprint: 'fp-sibom',
+      reported_at: NOW,
+      baseline_commit: 'b1',
+    });
+    const rows: GapRowRecord[] = [
+      gapRow('g-a', 'dom/a', 'absence', 'sibom-tags:r-aaaa'),
+      gapRow('g-b', 'dom/b', 'absence', 'sibom-tags:r-bbbb'),
+      gapRow('g-c', 'dom/c', 'absence', 'sibom-tags:r-cccc'),
+      gapRow('g-d', 'dom/d', 'absence', 'sibom-tags:r-dddd'),
+      gapRow('g-e', 'dom/e', 'absence', 'sibom-tags:r-eeee'),
+    ];
+    for (const row of rows) await ctx.gap.insertRow(row);
+  });
+
+  afterEach(async () => { await close(); });
+
+  async function workpackOf(key: string) {
+    return find((await listWorkpacks(ctx)).workpacks, key);
+  }
+
+  it('未解析边界、被依赖阻塞与重复认领都被拒绝', async () => {
+    const e = await workpackOf('dom/e');
+    await expect(claimWorkpack(ctx, e.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-e',
+    })).rejects.toMatchObject({ status: 409 });
+
+    const b = await workpackOf('dom/b');
+    await expect(claimWorkpack(ctx, b.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-b',
+    })).rejects.toMatchObject({ status: 409 });
+
+    const a = await workpackOf('dom/a');
+    const first = await claimWorkpack(ctx, a.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-a',
+    });
+    const again = await claimWorkpack(ctx, a.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-a',
+    });
+    expect(again.claim.id).toBe(first.claim.id);
+    await expect(claimWorkpack(ctx, a.id, {
+      executor: 'e2', isolation_mode: 'worktree', isolation_id: 'wt-a2',
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('workspace 串行、worktree 按事实边界相交裁决', async () => {
+    const a = await workpackOf('dom/a');
+    const c = await workpackOf('dom/c');
+    const d = await workpackOf('dom/d');
+
+    await claimWorkpack(ctx, a.id, {
+      executor: 'e1', isolation_mode: 'workspace', isolation_id: 'shared',
+    });
+    await expect(claimWorkpack(ctx, c.id, {
+      executor: 'e2', isolation_mode: 'workspace', isolation_id: 'shared',
+    })).rejects.toMatchObject({ status: 409 });
+
+    const cClaim = await claimWorkpack(ctx, c.id, {
+      executor: 'e2', isolation_mode: 'worktree', isolation_id: 'wt-c',
+    });
+    expect(cClaim.claim.isolation_mode).toBe('worktree');
+
+    await expect(claimWorkpack(ctx, d.id, {
+      executor: 'e3', isolation_mode: 'worktree', isolation_id: 'wt-d',
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('续租、释放与过期回收', async () => {
+    const a = await workpackOf('dom/a');
+    const first = await claimWorkpack(ctx, a.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-a',
+    });
+    const renewed = await renewWorkpack(ctx, a.id, { executor: 'e1' });
+    expect(renewed.lease_expires_at >= first.claim.lease_expires_at).toBe(true);
+    await releaseWorkpack(ctx, a.id, { executor: 'e1' });
+    expect(await ctx.workpacks.getActiveClaimByWorkpack(a.id)).toBeNull();
+
+    const second = await claimWorkpack(ctx, a.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-a',
+    });
+    await ctx.workpacks.updateClaimLease(
+      second.claim.id,
+      '2000-01-01T00:00:00.000Z',
+      '2000-01-01T00:00:00.000Z',
+    );
+    const third = await claimWorkpack(ctx, a.id, {
+      executor: 'e2', isolation_mode: 'worktree', isolation_id: 'wt-a2',
+    });
+    expect(third.claim.id).not.toBe(second.claim.id);
+    expect(third.claim.executor).toBe('e2');
+  });
+
+  it('越界上报判失败并留下证据；边界内上报保持认领', async () => {
+    const a = await workpackOf('dom/a');
+    await claimWorkpack(ctx, a.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-a',
+    });
+
+    const outside = await reportWorkpack(ctx, a.id, {
+      executor: 'e1', changed_files: ['src/b/other.ts'],
+    });
+    expect(outside.ok).toBe(false);
+    expect(outside.out_of_scope).toEqual(['src/b/other.ts']);
+    expect(await ctx.workpacks.getActiveClaimByWorkpack(a.id)).toBeNull();
+    expect(await ctx.gap.getEvidence(`workpack:${a.id}`)).not.toBeNull();
+
+    await claimWorkpack(ctx, a.id, {
+      executor: 'e2', isolation_mode: 'worktree', isolation_id: 'wt-a2',
+    });
+    const inside = await reportWorkpack(ctx, a.id, {
+      executor: 'e2', changed_files: ['src/a/file.ts'],
+    });
+    expect(inside.ok).toBe(true);
+    expect(await ctx.workpacks.getActiveClaimByWorkpack(a.id)).not.toBeNull();
+  });
+
+  it('边界只能收窄，放宽被拒绝', async () => {
+    const a = await workpackOf('dom/a');
+    await claimWorkpack(ctx, a.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-a',
+    });
+
+    const narrowed = await narrowWorkpackBoundary(ctx, a.id, {
+      executor: 'e1', writable: ['src/a/file.ts'],
+    });
+    expect(narrowed.boundary.fact_boundary.writable).toEqual(['src/a/file.ts']);
+
+    await expect(narrowWorkpackBoundary(ctx, a.id, {
+      executor: 'e1', writable: ['src/'],
+    })).rejects.toMatchObject({ status: 409 });
+
+    const outside = await reportWorkpack(ctx, a.id, {
+      executor: 'e1', changed_files: ['src/a/shared/other.ts'],
+    });
+    expect(outside.ok).toBe(false);
   });
 });

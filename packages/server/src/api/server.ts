@@ -24,8 +24,14 @@ import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
 import { snakeToCamel, camelToSnake, kebabToSnake, toApiEvent } from './transforms.js';
 import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene, signWaiversByCondition } from '../gap/engine.js';
-import { listWorkpacks } from '../workpack/engine.js';
-import { BomBaselineInput, EvidenceReportInput, WaiverInput, type BomConstraint } from '@sibeaver/core';
+import {
+  claimWorkpack, listWorkpacks, narrowWorkpackBoundary,
+  releaseWorkpack, renewWorkpack, reportWorkpack, WorkpackError,
+} from '../workpack/engine.js';
+import {
+  BomBaselineInput, ClaimInput, EvidenceReportInput, ExecutorInput,
+  NarrowBoundaryInput, ReportInput, WaiverInput, type BomConstraint,
+} from '@sibeaver/core';
 
 // ============================================================
 // 操作处理器注册表（导出供 direct-mode 调用方使用）
@@ -264,6 +270,61 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/workpacks', async (c) => {
     const slug = c.req.param('project');
     return json(c, await listWorkpacks(getCtx(slug)));
+  });
+
+  app.post('/:project/api/v1/workpacks/:id/claim', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ClaimInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await claimWorkpack(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/workpacks/:id/renew', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ExecutorInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await renewWorkpack(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/workpacks/:id/release', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ExecutorInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await releaseWorkpack(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/workpacks/:id/report', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ReportInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await reportWorkpack(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/workpacks/:id/boundary', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = NarrowBoundaryInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await narrowWorkpackBoundary(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
+    }
   });
 
   app.get('/:project/api/v1/gap/baseline', async (c) => {

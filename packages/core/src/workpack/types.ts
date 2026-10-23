@@ -67,9 +67,55 @@ export const WorkpackSummary = z.object({
 });
 export type WorkpackSummary = z.infer<typeof WorkpackSummary>;
 
+// ── 认领（claim/lease）────────────────────────────────────────
+
+export const IsolationMode = z.enum(['worktree', 'workspace']);
+export type IsolationMode = z.infer<typeof IsolationMode>;
+
+export const ClaimView = z.object({
+  id: z.string(),
+  workpack_id: z.string(),
+  executor: z.string(),
+  isolation_mode: IsolationMode,
+  isolation_id: z.string(),
+  lease_expires_at: z.string(),
+  heartbeat_at: z.string(),
+  created_at: z.string(),
+});
+export type ClaimView = z.infer<typeof ClaimView>;
+
+export const WorkpackView = Workpack.extend({
+  claim: ClaimView.nullable(),
+});
+export type WorkpackView = z.infer<typeof WorkpackView>;
+
+export const ClaimInput = z.object({
+  executor: z.string().min(1),
+  isolation_mode: IsolationMode,
+  isolation_id: z.string().min(1),
+});
+export type ClaimInput = z.infer<typeof ClaimInput>;
+
+export const ExecutorInput = z.object({
+  executor: z.string().min(1),
+});
+export type ExecutorInput = z.infer<typeof ExecutorInput>;
+
+export const ReportInput = z.object({
+  executor: z.string().min(1),
+  changed_files: z.array(z.string()),
+});
+export type ReportInput = z.infer<typeof ReportInput>;
+
+export const NarrowBoundaryInput = z.object({
+  executor: z.string().min(1),
+  writable: z.array(z.string()),
+});
+export type NarrowBoundaryInput = z.infer<typeof NarrowBoundaryInput>;
+
 export const WorkpackList = z.object({
   baseline: z.string().nullable(),
-  workpacks: z.array(Workpack),
+  workpacks: z.array(WorkpackView),
   summary: WorkpackSummary,
 });
 export type WorkpackList = z.infer<typeof WorkpackList>;

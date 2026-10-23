@@ -226,6 +226,27 @@ CREATE TABLE IF NOT EXISTS gap_waivers (
   created_at TEXT NOT NULL,
   PRIMARY KEY (project_id, fingerprint)
 );
+
+-- 工作组织控制面：认领租约（运行时状态，不进契约/认知图谱）
+CREATE TABLE IF NOT EXISTS workpack_claims (
+  id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  workpack_id TEXT NOT NULL,
+  executor TEXT NOT NULL,
+  isolation_mode TEXT NOT NULL,
+  isolation_id TEXT NOT NULL,
+  manifest JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  lease_expires_at TEXT NOT NULL,
+  heartbeat_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  released_at TEXT,
+  PRIMARY KEY (project_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_workpack_claims_active
+  ON workpack_claims(project_id, status, lease_expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workpack_claims_one_active
+  ON workpack_claims(project_id, workpack_id) WHERE status = 'active';
 ` + JSONB_NORMALIZE_SQL;
 
 let _poolPromise: Promise<postgres.Sql> | null = null;

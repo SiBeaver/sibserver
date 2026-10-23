@@ -1,16 +1,47 @@
 import { createHash } from 'node:crypto';
+import { ulid } from 'ulidx';
+import { toClaimView } from '@sibeaver/core';
 import type {
   BomConstraint,
   BomRequirement,
   BomSnapshot,
+  BoundaryContract,
+  ClaimInput,
+  ClaimRecord,
+  ClaimView,
   EvidenceRecord,
+  ExecutorInput,
   FactBoundary,
   GapIdentity,
   GapRowRecord,
+  NarrowBoundaryInput,
   OperationContext,
+  ReportInput,
   Workpack,
   WorkpackList,
+  WorkpackView,
 } from '@sibeaver/core';
+import { fingerprint } from '../gap/engine.js';
+
+// ============================================================
+// 认领/边界错误 — REST/MCP 按 status 映射
+// ============================================================
+
+export class WorkpackError extends Error {
+  constructor(message: string, readonly status = 409) {
+    super(message);
+    this.name = 'WorkpackError';
+  }
+}
+
+function leaseSeconds(): number {
+  const raw = Number(process.env.WORKPACK_LEASE_SECONDS ?? '600');
+  return Number.isFinite(raw) && raw > 0 ? raw : 600;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === '23505';
+}
 
 // ============================================================
 // 工作包派生 — 差距账本 → 可执行工作包（只读）
@@ -134,6 +165,16 @@ function boundariesOverlap(left: FactBoundary, right: FactBoundary): boolean {
   return left.writable.some(a => right.writable.some(b => scopesOverlap(a, b)));
 }
 
+/** 收窄判据：inner 必须落在 outer 之内（文件路径或 glob 前缀）。 */
+function scopeContains(outer: string, inner: string): boolean {
+  const a = normalizeScope(outer);
+  const b = normalizeScope(inner);
+  if (a === b) return true;
+  if (b.startsWith(`${a}/`)) return true;
+  const prefix = scopePrefix(a);
+  return prefix !== '' && (b === prefix || b.startsWith(`${prefix}/`));
+}
+
 // @sibom r-wp2b — 身份 = 基线 + 责任差距身份集合 + 事实边界集合的确定性摘要
 function workpackId(
   baseline: string,
@@ -184,6 +225,9 @@ export async function listWorkpacks(ctx: OperationContext): Promise<WorkpackList
       summary: { total: 0, ready: 0, blocked: 0, unresolved_boundary: 0 },
     };
   }
+
+  const now = new Date().toISOString();
+  await ctx.workpacks.expireStale(now);
 
   const rows = await ctx.gap.getOpenRows();
   const evidence = await ctx.gap.getAllEvidence();
@@ -242,9 +286,16 @@ export async function listWorkpacks(ctx: OperationContext): Promise<WorkpackList
 
   assignParallelGroups(workpacks);
 
+  const activeClaims = await ctx.workpacks.getActiveClaims();
+  const claimsByWorkpack = new Map(activeClaims.map(claim => [claim.workpack_id, claim]));
+  const views: WorkpackView[] = workpacks.map(workpack => {
+    const claim = claimsByWorkpack.get(workpack.id);
+    return { ...workpack, claim: claim ? toClaimView(claim) : null };
+  });
+
   return {
     baseline: baseline.bom_commit,
-    workpacks,
+    workpacks: views,
     summary: {
       total: workpacks.length,
       ready: workpacks.filter(wp => wp.parallel_group >= 0).length,
@@ -252,4 +303,199 @@ export async function listWorkpacks(ctx: OperationContext): Promise<WorkpackList
       unresolved_boundary: workpacks.filter(wp => wp.boundary.fact_boundary.status === 'unresolved').length,
     },
   };
+}
+
+// ============================================================
+// 认领与边界执行
+// ============================================================
+
+export interface WorkpackClaimResult {
+  claim: ClaimView;
+  workpack: WorkpackView;
+}
+
+export interface WorkpackReportResult {
+  ok: boolean;
+  out_of_scope: string[];
+  changed_files: string[];
+  evidence_source: string;
+}
+
+export interface WorkpackBoundaryResult {
+  claim: ClaimView;
+  boundary: BoundaryContract;
+}
+
+// @sibom r-ar1a — 认领是唯一占用；同一工作包同一时刻只有一个有效认领
+// @sibom r-ar3c — 事实冲突机械裁决：先到先得，边界相交拒绝
+// @sibom r-bc3c — 物理隔离承载并行：workspace 串行，worktree 按边界相交判定
+export async function claimWorkpack(
+  ctx: OperationContext,
+  workpackId: string,
+  input: ClaimInput,
+): Promise<WorkpackClaimResult> {
+  const now = new Date().toISOString();
+  const list = await listWorkpacks(ctx);
+  const workpack = list.workpacks.find(item => item.id === workpackId);
+  if (!workpack) throw new WorkpackError('工作包不存在（可能已随差距关闭）', 404);
+
+  const active = await ctx.workpacks.getActiveClaims();
+  const existing = active.find(claim => claim.workpack_id === workpackId);
+  if (existing) {
+    if (existing.executor === input.executor) {
+      return { claim: toClaimView(existing), workpack };
+    }
+    throw new WorkpackError(`工作包已被 ${existing.executor} 认领`, 409);
+  }
+
+  if (workpack.boundary.fact_boundary.status !== 'derived') {
+    throw new WorkpackError('事实边界未解析：先收窄/声明可写范围再认领', 409);
+  }
+  if (workpack.blocked_by.length > 0) {
+    throw new WorkpackError(`依赖未满足：${workpack.blocked_by.join(', ')}`, 409);
+  }
+
+  if (input.isolation_mode === 'workspace' && active.length > 0) {
+    throw new WorkpackError('共享工作区只允许串行执行：已有活跃认领', 409);
+  }
+  if (input.isolation_mode === 'worktree') {
+    const conflict = active.find(claim =>
+      boundariesOverlap(workpack.boundary.fact_boundary, claim.manifest.boundary.fact_boundary),
+    );
+    if (conflict) {
+      throw new WorkpackError(`事实边界与已认领工作包 ${conflict.workpack_id} 相交`, 409);
+    }
+  }
+
+  const leaseExpiresAt = new Date(Date.now() + leaseSeconds() * 1000).toISOString();
+  const claim: ClaimRecord = {
+    id: ulid(),
+    workpack_id: workpackId,
+    executor: input.executor,
+    isolation_mode: input.isolation_mode,
+    isolation_id: input.isolation_id,
+    manifest: workpack,
+    status: 'active',
+    lease_expires_at: leaseExpiresAt,
+    heartbeat_at: now,
+    created_at: now,
+    released_at: null,
+  };
+
+  try {
+    await ctx.workpacks.insertClaim(claim);
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new WorkpackError('工作包已被认领', 409);
+    throw error;
+  }
+
+  return { claim: toClaimView(claim), workpack };
+}
+
+// @sibom r-ar2b — 租约到期/心跳中断可回收；续租延长有效期
+export async function renewWorkpack(
+  ctx: OperationContext,
+  workpackId: string,
+  input: ExecutorInput,
+): Promise<ClaimView> {
+  const now = new Date().toISOString();
+  await ctx.workpacks.expireStale(now);
+  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
+  if (!claim || claim.executor !== input.executor) {
+    throw new WorkpackError('无有效认领或执行者不匹配', 409);
+  }
+  const leaseExpiresAt = new Date(Date.now() + leaseSeconds() * 1000).toISOString();
+  await ctx.workpacks.updateClaimLease(claim.id, leaseExpiresAt, now);
+  return toClaimView({ ...claim, lease_expires_at: leaseExpiresAt, heartbeat_at: now });
+}
+
+export async function releaseWorkpack(
+  ctx: OperationContext,
+  workpackId: string,
+  input: ExecutorInput,
+): Promise<{ ok: true }> {
+  const now = new Date().toISOString();
+  await ctx.workpacks.expireStale(now);
+  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
+  if (!claim || claim.executor !== input.executor) {
+    throw new WorkpackError('无有效认领或执行者不匹配', 409);
+  }
+  await ctx.workpacks.closeClaim(claim.id, 'released', now);
+  return { ok: true };
+}
+
+// @sibom r-bc4d — 越界即失败：越界差异作为证据上报，工作包不进入合并
+// @sibom r-ar6f — 完成只认证据：越界/自报不构成完成判定
+export async function reportWorkpack(
+  ctx: OperationContext,
+  workpackId: string,
+  input: ReportInput,
+): Promise<WorkpackReportResult> {
+  const now = new Date().toISOString();
+  await ctx.workpacks.expireStale(now);
+  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
+  if (!claim || claim.executor !== input.executor) {
+    throw new WorkpackError('无有效认领或执行者不匹配', 409);
+  }
+
+  const writable = claim.manifest.boundary.fact_boundary.writable;
+  const outOfScope = input.changed_files.filter(file => !writable.some(scope => scopeContains(scope, file)));
+  const evidenceSource = `workpack:${workpackId}`;
+  const payload = {
+    workpack_id: workpackId,
+    executor: claim.executor,
+    isolation_mode: claim.isolation_mode,
+    isolation_id: claim.isolation_id,
+    changed_files: input.changed_files,
+    out_of_scope: outOfScope,
+    result: outOfScope.length > 0 ? 'failed' : 'passed',
+  };
+  await ctx.gap.upsertEvidence({
+    source_id: evidenceSource,
+    payload,
+    fingerprint: fingerprint(payload),
+    reported_at: now,
+    baseline_commit: claim.manifest.baseline,
+  });
+
+  if (outOfScope.length > 0) {
+    await ctx.workpacks.closeClaim(claim.id, 'failed', now);
+    return { ok: false, out_of_scope: outOfScope, changed_files: input.changed_files, evidence_source: evidenceSource };
+  }
+  return { ok: true, out_of_scope: [], changed_files: input.changed_files, evidence_source: evidenceSource };
+}
+
+// @sibom r-bc5e — 边界只能收窄；放宽须人确认
+export async function narrowWorkpackBoundary(
+  ctx: OperationContext,
+  workpackId: string,
+  input: NarrowBoundaryInput,
+): Promise<WorkpackBoundaryResult> {
+  const now = new Date().toISOString();
+  await ctx.workpacks.expireStale(now);
+  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
+  if (!claim || claim.executor !== input.executor) {
+    throw new WorkpackError('无有效认领或执行者不匹配', 409);
+  }
+
+  const current = claim.manifest.boundary.fact_boundary.writable;
+  const proposed = [...new Set(input.writable)].sort();
+  const invalid = proposed.filter(scope => !current.some(outer => scopeContains(outer, scope)));
+  if (invalid.length > 0) {
+    throw new WorkpackError(`边界只能收窄；以下范围超出当前边界（放宽须人确认）：${invalid.join(', ')}`, 409);
+  }
+
+  const manifest: Workpack = {
+    ...claim.manifest,
+    boundary: {
+      ...claim.manifest.boundary,
+      fact_boundary: {
+        ...claim.manifest.boundary.fact_boundary,
+        writable: proposed,
+        status: proposed.length > 0 ? 'derived' : 'unresolved',
+      },
+    },
+  };
+  await ctx.workpacks.updateClaimManifest(claim.id, manifest);
+  return { claim: toClaimView({ ...claim, manifest }), boundary: manifest.boundary };
 }

@@ -1,6 +1,7 @@
 import type { Sql } from '../storage/db.js';
 import { NodeStore, EdgeStore, EventStore } from '../storage/stores.js';
 import { GapStore } from '../storage/gap-store.js';
+import { WorkpackStore } from '../storage/workpack-store.js';
 import { EventEmitter } from '../events/emitter.js';
 
 // ============================================================
@@ -13,6 +14,7 @@ export class OperationContext {
   readonly events: EventEmitter;
   readonly eventStore: EventStore;
   readonly gap: GapStore;
+  readonly workpacks: WorkpackStore;
   private readonly sql: Sql;
   private readonly projectId: string;
 
@@ -24,6 +26,7 @@ export class OperationContext {
     this.eventStore = new EventStore(sql, projectId);
     this.events = new EventEmitter(this.eventStore);
     this.gap = new GapStore(sql, projectId);
+    this.workpacks = new WorkpackStore(sql, projectId);
   }
 
   /** 在单个数据库事务内执行操作；任一步失败整体回滚，不留孤儿行/部分状态 */

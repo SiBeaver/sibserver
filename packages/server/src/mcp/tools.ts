@@ -23,7 +23,10 @@ import {
 import type { ProjectManager } from '../projects/index.js';
 import { snakeToCamel } from '../api/transforms.js';
 import { listGaps } from '../gap/engine.js';
-import { listWorkpacks } from '../workpack/engine.js';
+import {
+  claimWorkpack, listWorkpacks, narrowWorkpackBoundary,
+  releaseWorkpack, renewWorkpack, reportWorkpack,
+} from '../workpack/engine.js';
 
 /** Wrap result: apply camelCase transform + JSON serialize for MCP text output */
 function jsonResult(data: unknown) {
@@ -429,6 +432,55 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await listWorkpacks(getCtx()));
   }));
 
+  server.tool('claim_workpack', '认领工作包（租约 + 隔离声明）；同一工作包同一时刻只有一个有效认领', {
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识（harness / agent 实例）'),
+    isolation_mode: z.enum(['worktree', 'workspace']).describe('worktree=独立工作区；workspace=共享工作区（串行）'),
+    isolation_id: z.string().describe('隔离标识（worktree 路径 / 分支 / 工作区 ID）'),
+  }, log('claim_workpack', async (args) => {
+    return jsonResult(await claimWorkpack(getCtx(), args.workpack_id, {
+      executor: args.executor,
+      isolation_mode: args.isolation_mode,
+      isolation_id: args.isolation_id,
+    }));
+  }));
+
+  server.tool('renew_workpack', '续租工作包认领（心跳）', {
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识'),
+  }, log('renew_workpack', async (args) => {
+    return jsonResult(await renewWorkpack(getCtx(), args.workpack_id, { executor: args.executor }));
+  }));
+
+  server.tool('release_workpack', '释放工作包认领', {
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识'),
+  }, log('release_workpack', async (args) => {
+    return jsonResult(await releaseWorkpack(getCtx(), args.workpack_id, { executor: args.executor }));
+  }));
+
+  server.tool('report_workpack', '上报执行改动并做事实边界检查；越界即失败并记录证据', {
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识'),
+    changed_files: z.array(z.string()).describe('本次执行改动的文件路径'),
+  }, log('report_workpack', async (args) => {
+    return jsonResult(await reportWorkpack(getCtx(), args.workpack_id, {
+      executor: args.executor,
+      changed_files: args.changed_files,
+    }));
+  }));
+
+  server.tool('narrow_workpack_boundary', '收窄认领的事实边界；放宽会被拒绝，须人确认', {
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识'),
+    writable: z.array(z.string()).describe('收窄后的可写范围（必须是当前边界的子集）'),
+  }, log('narrow_workpack_boundary', async (args) => {
+    return jsonResult(await narrowWorkpackBoundary(getCtx(), args.workpack_id, {
+      executor: args.executor,
+      writable: args.writable,
+    }));
+  }));
+
   // --- 风险与技术债 ---
   server.tool('identify_risk', '识别一个项目风险', {
     title: z.string().describe('风险标题'),
@@ -755,6 +807,60 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     project: projectParam,
   }, log('list_workpacks', async ({ project }) => {
     return jsonResult(await listWorkpacks(await ctx(project)));
+  }));
+
+  server.tool('claim_workpack', '认领工作包（租约 + 隔离声明）；同一工作包同一时刻只有一个有效认领', {
+    project: projectParam,
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识（harness / agent 实例）'),
+    isolation_mode: z.enum(['worktree', 'workspace']).describe('worktree=独立工作区；workspace=共享工作区（串行）'),
+    isolation_id: z.string().describe('隔离标识（worktree 路径 / 分支 / 工作区 ID）'),
+  }, log('claim_workpack', async ({ project, ...args }) => {
+    return jsonResult(await claimWorkpack(await ctx(project), args.workpack_id, {
+      executor: args.executor,
+      isolation_mode: args.isolation_mode,
+      isolation_id: args.isolation_id,
+    }));
+  }));
+
+  server.tool('renew_workpack', '续租工作包认领（心跳）', {
+    project: projectParam,
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识'),
+  }, log('renew_workpack', async ({ project, ...args }) => {
+    return jsonResult(await renewWorkpack(await ctx(project), args.workpack_id, { executor: args.executor }));
+  }));
+
+  server.tool('release_workpack', '释放工作包认领', {
+    project: projectParam,
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识'),
+  }, log('release_workpack', async ({ project, ...args }) => {
+    return jsonResult(await releaseWorkpack(await ctx(project), args.workpack_id, { executor: args.executor }));
+  }));
+
+  server.tool('report_workpack', '上报执行改动并做事实边界检查；越界即失败并记录证据', {
+    project: projectParam,
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识'),
+    changed_files: z.array(z.string()).describe('本次执行改动的文件路径'),
+  }, log('report_workpack', async ({ project, ...args }) => {
+    return jsonResult(await reportWorkpack(await ctx(project), args.workpack_id, {
+      executor: args.executor,
+      changed_files: args.changed_files,
+    }));
+  }));
+
+  server.tool('narrow_workpack_boundary', '收窄认领的事实边界；放宽会被拒绝，须人确认', {
+    project: projectParam,
+    workpack_id: z.string().describe('工作包 ID'),
+    executor: z.string().describe('执行者标识'),
+    writable: z.array(z.string()).describe('收窄后的可写范围（必须是当前边界的子集）'),
+  }, log('narrow_workpack_boundary', async ({ project, ...args }) => {
+    return jsonResult(await narrowWorkpackBoundary(await ctx(project), args.workpack_id, {
+      executor: args.executor,
+      writable: args.writable,
+    }));
   }));
 
   // --- 风险与技术债 ---
