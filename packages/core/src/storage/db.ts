@@ -247,6 +247,26 @@ CREATE INDEX IF NOT EXISTS idx_workpack_claims_active
   ON workpack_claims(project_id, status, lease_expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workpack_claims_one_active
   ON workpack_claims(project_id, workpack_id) WHERE status = 'active';
+
+-- 契约变更/重规划提案（运行时状态；契约提案由基线前移确认）
+CREATE TABLE IF NOT EXISTS workpack_proposals (
+  id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  workpack_id TEXT,
+  kind TEXT NOT NULL,
+  proposer TEXT NOT NULL,
+  requirement_keys TEXT[] NOT NULL DEFAULT '{}',
+  summary TEXT NOT NULL,
+  detail JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'proposed',
+  created_at TEXT NOT NULL,
+  confirmed_commit TEXT,
+  confirmed_by TEXT,
+  resolved_at TEXT,
+  PRIMARY KEY (project_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_workpack_proposals_status
+  ON workpack_proposals(project_id, status, created_at);
 ` + JSONB_NORMALIZE_SQL;
 
 let _poolPromise: Promise<postgres.Sql> | null = null;

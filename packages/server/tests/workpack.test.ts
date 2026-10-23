@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../core/tests/helpers/test-db.js';
 import { OperationContext } from '@sibeaver/core';
 import type { BomSnapshot, GapRowRecord, Workpack } from '@sibeaver/core';
+import { setBaseline } from '../src/gap/engine.js';
 import {
-  claimWorkpack, listWorkpacks, narrowWorkpackBoundary,
-  releaseWorkpack, renewWorkpack, reportWorkpack, WorkpackError,
+  claimWorkpack, confirmReplanProposal, listProposals, listWorkpacks, narrowWorkpackBoundary,
+  proposeContractChange, proposeReplan, releaseWorkpack, renewWorkpack, reportWorkpack, WorkpackError,
 } from '../src/workpack/engine.js';
 
 const NOW = '2026-08-20T00:00:00.000Z';
@@ -304,5 +305,103 @@ describe('工作包认领与边界执行', () => {
       executor: 'e1', changed_files: ['src/a/shared/other.ts'],
     });
     expect(outside.ok).toBe(false);
+  });
+});
+
+describe('工作包提案与重规划', () => {
+  let ctx: OperationContext;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    const t = await createTestDb();
+    ctx = new OperationContext(t.sql, 'default');
+    close = t.close;
+    await ctx.gap.setBaseline(bom(), NOW);
+    await ctx.gap.upsertEvidence({
+      source_id: 'sibom-tags',
+      payload: { rules: [{ id: 'r-aaaa', file: 'src/a/file.ts' }] },
+      fingerprint: 'fp-sibom',
+      reported_at: NOW,
+      baseline_commit: 'b1',
+    });
+    const rows: GapRowRecord[] = [
+      gapRow('g-a', 'dom/a', 'absence', 'sibom-tags:r-aaaa'),
+      gapRow('g-b', 'dom/b', 'absence', 'sibom-tags:r-bbbb'),
+      gapRow('g-c', 'dom/c', 'absence', 'sibom-tags:r-cccc'),
+      gapRow('g-d', 'dom/d', 'absence', 'sibom-tags:r-dddd'),
+      gapRow('g-e', 'dom/e', 'absence', 'sibom-tags:r-eeee'),
+    ];
+    for (const row of rows) await ctx.gap.insertRow(row);
+  });
+
+  afterEach(async () => { await close(); });
+
+  async function workpackOf(key: string) {
+    return find((await listWorkpacks(ctx)).workpacks, key);
+  }
+
+  async function claimA() {
+    const a = await workpackOf('dom/a');
+    await claimWorkpack(ctx, a.id, {
+      executor: 'e1', isolation_mode: 'worktree', isolation_id: 'wt-a',
+    });
+    return a;
+  }
+
+  it('契约提案须有认领且键在责任范围；基线前移即确认', async () => {
+    const a = await workpackOf('dom/a');
+    await expect(proposeContractChange(ctx, a.id, {
+      proposer: 'e1', summary: '无认领提案', requirement_keys: ['dom/a'],
+    })).rejects.toMatchObject({ status: 409 });
+
+    await claimA();
+    await expect(proposeContractChange(ctx, a.id, {
+      proposer: 'e1', summary: '越界提案', requirement_keys: ['dom/b'],
+    })).rejects.toMatchObject({ status: 409 });
+
+    const proposal = await proposeContractChange(ctx, a.id, {
+      proposer: 'e1', summary: '修改需求A判据', requirement_keys: ['dom/a'],
+    });
+    expect(proposal.kind).toBe('contract');
+    expect(proposal.status).toBe('proposed');
+    expect(proposal.requirement_keys).toEqual(['dom/a']);
+
+    const next = bom();
+    next.commit = 'b2';
+    next.requirements[0].title = '需求A v2';
+    await setBaseline(ctx, { commit: 'b2', requirements: next.requirements }, NOW);
+
+    const confirmed = (await listProposals(ctx, 'confirmed')).find(item => item.id === proposal.id);
+    expect(confirmed?.status).toBe('confirmed');
+    expect(confirmed?.confirmed_commit).toBe('b2');
+  });
+
+  it('重规划只提案，服务端不应用；人显式接受只记录', async () => {
+    const before = await listWorkpacks(ctx);
+    const replan = await proposeReplan(ctx, {
+      proposer: 'planner',
+      summary: '重新切分需求A',
+      detail: { groups: [['dom/a', 'dom/c']] },
+    });
+    expect(replan.kind).toBe('replan');
+    expect(replan.status).toBe('proposed');
+
+    const after = await listWorkpacks(ctx);
+    expect(after.workpacks.map(wp => [wp.requirement_keys, wp.parallel_group]))
+      .toEqual(before.workpacks.map(wp => [wp.requirement_keys, wp.parallel_group]));
+
+    const confirmed = await confirmReplanProposal(ctx, replan.id, { confirmed_by: 'owner' });
+    expect(confirmed.status).toBe('confirmed');
+    expect(confirmed.confirmed_by).toBe('owner');
+  });
+
+  it('契约提案不走进显式重规划确认', async () => {
+    const a = await claimA();
+    const proposal = await proposeContractChange(ctx, a.id, {
+      proposer: 'e1', summary: '修改契约', requirement_keys: ['dom/a'],
+    });
+    await expect(confirmReplanProposal(ctx, proposal.id, {
+      confirmed_by: 'owner',
+    })).rejects.toMatchObject({ status: 409 });
   });
 });

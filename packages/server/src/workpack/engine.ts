@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ulid } from 'ulidx';
-import { toClaimView } from '@sibeaver/core';
+import { toClaimView, toProposalView } from '@sibeaver/core';
 import type {
   BomConstraint,
   BomRequirement,
@@ -9,6 +9,8 @@ import type {
   ClaimInput,
   ClaimRecord,
   ClaimView,
+  ConfirmProposalInput,
+  ContractProposalInput,
   EvidenceRecord,
   ExecutorInput,
   FactBoundary,
@@ -16,6 +18,10 @@ import type {
   GapRowRecord,
   NarrowBoundaryInput,
   OperationContext,
+  ProposalRecord,
+  ProposalStatus,
+  ProposalView,
+  ReplanProposalInput,
   ReportInput,
   Workpack,
   WorkpackList,
@@ -498,4 +504,101 @@ export async function narrowWorkpackBoundary(
   };
   await ctx.workpacks.updateClaimManifest(claim.id, manifest);
   return { claim: toClaimView({ ...claim, manifest }), boundary: manifest.boundary };
+}
+
+// ============================================================
+// 提案：契约变更（人确认 = 基线前移）与重规划（只提案）
+// ============================================================
+
+// @sibom r-ar4d — 契约变更只能提案；执行者不直接修改契约，基线前移即人确认
+export async function proposeContractChange(
+  ctx: OperationContext,
+  workpackId: string,
+  input: ContractProposalInput,
+): Promise<ProposalView> {
+  const now = new Date().toISOString();
+  await ctx.workpacks.expireStale(now);
+  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
+  if (!claim || claim.executor !== input.proposer) {
+    throw new WorkpackError('无有效认领或提案者不匹配', 409);
+  }
+
+  const responsibility = claim.manifest.requirement_keys;
+  const invalid = input.requirement_keys.filter(key => !responsibility.includes(key));
+  if (invalid.length > 0) {
+    throw new WorkpackError(`提案需求键不在工作包责任范围：${invalid.join(', ')}`, 409);
+  }
+
+  const record: ProposalRecord = {
+    id: ulid(),
+    workpack_id: workpackId,
+    kind: 'contract',
+    proposer: input.proposer,
+    requirement_keys: [...new Set(input.requirement_keys)].sort(),
+    summary: input.summary,
+    detail: input.detail ?? {},
+    status: 'proposed',
+    created_at: now,
+    confirmed_commit: null,
+    confirmed_by: null,
+    resolved_at: null,
+  };
+  await ctx.proposals.insertProposal(record);
+  return toProposalView(record);
+}
+
+// @sibom r-ar5e — 重规划只提案：服务端不应用提案，也不改已确认契约
+export async function proposeReplan(
+  ctx: OperationContext,
+  input: ReplanProposalInput,
+): Promise<ProposalView> {
+  const now = new Date().toISOString();
+  const record: ProposalRecord = {
+    id: ulid(),
+    workpack_id: null,
+    kind: 'replan',
+    proposer: input.proposer,
+    requirement_keys: [],
+    summary: input.summary,
+    detail: input.detail ?? {},
+    status: 'proposed',
+    created_at: now,
+    confirmed_commit: null,
+    confirmed_by: null,
+    resolved_at: null,
+  };
+  await ctx.proposals.insertProposal(record);
+  return toProposalView(record);
+}
+
+export async function listProposals(
+  ctx: OperationContext,
+  status?: ProposalStatus,
+): Promise<ProposalView[]> {
+  const records = await ctx.proposals.listProposals(status);
+  return records.map(toProposalView);
+}
+
+// @sibom r-ar5e — 重规划提案由人显式接受；服务端只记录，不改变派生工作包
+export async function confirmReplanProposal(
+  ctx: OperationContext,
+  proposalId: string,
+  input: ConfirmProposalInput,
+): Promise<ProposalView> {
+  const proposal = await ctx.proposals.getProposal(proposalId);
+  if (!proposal) throw new WorkpackError('提案不存在', 404);
+  if (proposal.kind !== 'replan') {
+    throw new WorkpackError('契约提案经基线前移确认，不走显式确认', 409);
+  }
+  if (proposal.status !== 'proposed') {
+    throw new WorkpackError('提案已处理', 409);
+  }
+  const now = new Date().toISOString();
+  await ctx.proposals.confirmReplan(proposalId, input.confirmed_by, now);
+  return toProposalView({
+    ...proposal,
+    status: 'confirmed',
+    confirmed_by: input.confirmed_by,
+    resolved_at: now,
+  });
 }

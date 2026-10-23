@@ -24,7 +24,8 @@ import type { ProjectManager } from '../projects/index.js';
 import { snakeToCamel } from '../api/transforms.js';
 import { listGaps } from '../gap/engine.js';
 import {
-  claimWorkpack, listWorkpacks, narrowWorkpackBoundary,
+  claimWorkpack, confirmReplanProposal, listProposals, listWorkpacks,
+  narrowWorkpackBoundary, proposeContractChange, proposeReplan,
   releaseWorkpack, renewWorkpack, reportWorkpack,
 } from '../workpack/engine.js';
 
@@ -481,6 +482,41 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     }));
   }));
 
+  server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认', {
+    workpack_id: z.string().describe('工作包 ID'),
+    proposer: z.string().describe('提案者（须持有该工作包认领）'),
+    summary: z.string().describe('变更摘要'),
+    requirement_keys: z.array(z.string()).describe('受影响的需求键（须在工作包责任范围内）'),
+  }, log('propose_contract_change', async (args) => {
+    return jsonResult(await proposeContractChange(getCtx(), args.workpack_id, {
+      proposer: args.proposer,
+      summary: args.summary,
+      requirement_keys: args.requirement_keys,
+    }));
+  }));
+
+  server.tool('propose_replan', '提交重规划提案；只提案，服务端不应用、不改已确认契约', {
+    proposer: z.string().describe('规划者标识'),
+    summary: z.string().describe('重规划摘要'),
+  }, log('propose_replan', async (args) => {
+    return jsonResult(await proposeReplan(getCtx(), { proposer: args.proposer, summary: args.summary }));
+  }));
+
+  server.tool('list_contract_proposals', '列出契约变更/重规划提案', {
+    status: z.enum(['proposed', 'confirmed', 'superseded']).optional().describe('按状态过滤'),
+  }, log('list_contract_proposals', async (args) => {
+    return jsonResult(await listProposals(getCtx(), args.status));
+  }));
+
+  server.tool('confirm_replan_proposal', '人接受重规划提案（只记录，不改变派生工作包）', {
+    proposal_id: z.string().describe('提案 ID'),
+    confirmed_by: z.string().describe('确认人标识'),
+  }, log('confirm_replan_proposal', async (args) => {
+    return jsonResult(await confirmReplanProposal(getCtx(), args.proposal_id, {
+      confirmed_by: args.confirmed_by,
+    }));
+  }));
+
   // --- 风险与技术债 ---
   server.tool('identify_risk', '识别一个项目风险', {
     title: z.string().describe('风险标题'),
@@ -860,6 +896,45 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await narrowWorkpackBoundary(await ctx(project), args.workpack_id, {
       executor: args.executor,
       writable: args.writable,
+    }));
+  }));
+
+  server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认', {
+    project: projectParam,
+    workpack_id: z.string().describe('工作包 ID'),
+    proposer: z.string().describe('提案者（须持有该工作包认领）'),
+    summary: z.string().describe('变更摘要'),
+    requirement_keys: z.array(z.string()).describe('受影响的需求键（须在工作包责任范围内）'),
+  }, log('propose_contract_change', async ({ project, ...args }) => {
+    return jsonResult(await proposeContractChange(await ctx(project), args.workpack_id, {
+      proposer: args.proposer,
+      summary: args.summary,
+      requirement_keys: args.requirement_keys,
+    }));
+  }));
+
+  server.tool('propose_replan', '提交重规划提案；只提案，服务端不应用、不改已确认契约', {
+    project: projectParam,
+    proposer: z.string().describe('规划者标识'),
+    summary: z.string().describe('重规划摘要'),
+  }, log('propose_replan', async ({ project, ...args }) => {
+    return jsonResult(await proposeReplan(await ctx(project), { proposer: args.proposer, summary: args.summary }));
+  }));
+
+  server.tool('list_contract_proposals', '列出契约变更/重规划提案', {
+    project: projectParam,
+    status: z.enum(['proposed', 'confirmed', 'superseded']).optional().describe('按状态过滤'),
+  }, log('list_contract_proposals', async ({ project, ...args }) => {
+    return jsonResult(await listProposals(await ctx(project), args.status));
+  }));
+
+  server.tool('confirm_replan_proposal', '人接受重规划提案（只记录，不改变派生工作包）', {
+    project: projectParam,
+    proposal_id: z.string().describe('提案 ID'),
+    confirmed_by: z.string().describe('确认人标识'),
+  }, log('confirm_replan_proposal', async ({ project, ...args }) => {
+    return jsonResult(await confirmReplanProposal(await ctx(project), args.proposal_id, {
+      confirmed_by: args.confirmed_by,
     }));
   }));
 

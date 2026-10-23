@@ -119,3 +119,47 @@ export const WorkpackList = z.object({
   summary: WorkpackSummary,
 });
 export type WorkpackList = z.infer<typeof WorkpackList>;
+
+// ── 契约变更提案 / 重规划提案 ─────────────────────────────────
+
+export const ProposalKind = z.enum(['contract', 'replan']);
+export type ProposalKind = z.infer<typeof ProposalKind>;
+
+export const ProposalStatus = z.enum(['proposed', 'confirmed', 'superseded']);
+export type ProposalStatus = z.infer<typeof ProposalStatus>;
+
+export const ProposalView = z.object({
+  id: z.string(),
+  workpack_id: z.string().nullable(),
+  kind: ProposalKind,
+  proposer: z.string(),
+  requirement_keys: z.array(z.string()),
+  summary: z.string(),
+  detail: z.unknown(),
+  status: ProposalStatus,
+  created_at: z.string(),
+  confirmed_commit: z.string().nullable(),
+  confirmed_by: z.string().nullable(),
+  resolved_at: z.string().nullable(),
+});
+export type ProposalView = z.infer<typeof ProposalView>;
+
+export const ContractProposalInput = z.object({
+  proposer: z.string().min(1),
+  summary: z.string().min(1),
+  requirement_keys: z.array(z.string().min(1)).min(1),
+  detail: z.unknown().optional(),
+});
+export type ContractProposalInput = z.infer<typeof ContractProposalInput>;
+
+export const ReplanProposalInput = z.object({
+  proposer: z.string().min(1),
+  summary: z.string().min(1),
+  detail: z.unknown().optional(),
+});
+export type ReplanProposalInput = z.infer<typeof ReplanProposalInput>;
+
+export const ConfirmProposalInput = z.object({
+  confirmed_by: z.string().min(1),
+});
+export type ConfirmProposalInput = z.infer<typeof ConfirmProposalInput>;
