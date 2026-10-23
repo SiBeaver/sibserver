@@ -1,1 +1,0 @@
-export { PanoramicDashboard } from './PanoramicDashboard';
