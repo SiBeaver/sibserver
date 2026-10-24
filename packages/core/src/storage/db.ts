@@ -267,6 +267,20 @@ CREATE TABLE IF NOT EXISTS workpack_proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_workpack_proposals_status
   ON workpack_proposals(project_id, status, created_at);
+
+-- 执行者画像：声明性能力记录（不路由模型，不做分派匹配）
+CREATE TABLE IF NOT EXISTS executor_profiles (
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  executor TEXT NOT NULL,
+  harness TEXT NOT NULL,
+  models TEXT[] NOT NULL DEFAULT '{}',
+  concurrency INTEGER NOT NULL,
+  isolation_modes TEXT[] NOT NULL DEFAULT '{}',
+  writable_scopes TEXT[] NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, executor)
+);
 ` + JSONB_NORMALIZE_SQL;
 
 let _poolPromise: Promise<postgres.Sql> | null = null;

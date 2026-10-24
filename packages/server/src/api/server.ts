@@ -29,10 +29,11 @@ import {
   narrowWorkpackBoundary, proposeContractChange, proposeReplan,
   releaseWorkpack, renewWorkpack, reportWorkpack, WorkpackError,
 } from '../workpack/engine.js';
+import { listExecutors, registerExecutor } from '../executor/engine.js';
 import {
   BomBaselineInput, ClaimInput, ConfirmProposalInput, ContractProposalInput,
-  EvidenceReportInput, ExecutorInput, NarrowBoundaryInput, ProposalStatus,
-  ReplanProposalInput, ReportInput, WaiverInput, type BomConstraint,
+  EvidenceReportInput, ExecutorInput, ExecutorProfileInput, NarrowBoundaryInput,
+  ProposalStatus, ReplanProposalInput, ReportInput, WaiverInput, type BomConstraint,
 } from '@sibeaver/core';
 
 // ============================================================
@@ -272,6 +273,18 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.get('/:project/api/v1/workpacks', async (c) => {
     const slug = c.req.param('project');
     return json(c, await listWorkpacks(getCtx(slug)));
+  });
+
+  app.get('/:project/api/v1/executors', async (c) => {
+    const slug = c.req.param('project');
+    return json(c, await listExecutors(getCtx(slug)));
+  });
+
+  app.post('/:project/api/v1/executors', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ExecutorProfileInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    return json(c, await registerExecutor(getCtx(slug), parsed.data));
   });
 
   app.post('/:project/api/v1/workpacks/:id/claim', async (c) => {

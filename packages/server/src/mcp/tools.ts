@@ -28,6 +28,7 @@ import {
   narrowWorkpackBoundary, proposeContractChange, proposeReplan,
   releaseWorkpack, renewWorkpack, reportWorkpack,
 } from '../workpack/engine.js';
+import { listExecutors, registerExecutor } from '../executor/engine.js';
 
 /** Wrap result: apply camelCase transform + JSON serialize for MCP text output */
 function jsonResult(data: unknown) {
@@ -517,6 +518,22 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     }));
   }));
 
+  server.tool('register_executor', '注册/更新执行者画像（声明能力：harness、模型、并发度、隔离方式、可写范围）；纯记录，不路由模型', {
+    executor: z.string().describe('执行者标识'),
+    harness: z.string().describe('harness 名称'),
+    models: z.array(z.string()).describe('可用模型（仅记录，控制面不路由）'),
+    concurrency: z.number().int().min(1).describe('可并行工作包数'),
+    isolation_modes: z.array(z.enum(['worktree', 'workspace'])).min(1).describe('支持的隔离方式'),
+    writable_scopes: z.array(z.string()).describe('声明可写的事实范围'),
+  }, log('register_executor', async (args) => {
+    return jsonResult(await registerExecutor(getCtx(), args));
+  }));
+
+  server.tool('list_executors', '列出执行者画像（只读）', {
+  }, log('list_executors', async () => {
+    return jsonResult(await listExecutors(getCtx()));
+  }));
+
   // --- 风险与技术债 ---
   server.tool('identify_risk', '识别一个项目风险', {
     title: z.string().describe('风险标题'),
@@ -936,6 +953,24 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await confirmReplanProposal(await ctx(project), args.proposal_id, {
       confirmed_by: args.confirmed_by,
     }));
+  }));
+
+  server.tool('register_executor', '注册/更新执行者画像（声明能力：harness、模型、并发度、隔离方式、可写范围）；纯记录，不路由模型', {
+    project: projectParam,
+    executor: z.string().describe('执行者标识'),
+    harness: z.string().describe('harness 名称'),
+    models: z.array(z.string()).describe('可用模型（仅记录，控制面不路由）'),
+    concurrency: z.number().int().min(1).describe('可并行工作包数'),
+    isolation_modes: z.array(z.enum(['worktree', 'workspace'])).min(1).describe('支持的隔离方式'),
+    writable_scopes: z.array(z.string()).describe('声明可写的事实范围'),
+  }, log('register_executor', async ({ project, ...args }) => {
+    return jsonResult(await registerExecutor(await ctx(project), args));
+  }));
+
+  server.tool('list_executors', '列出执行者画像（只读）', {
+    project: projectParam,
+  }, log('list_executors', async ({ project }) => {
+    return jsonResult(await listExecutors(await ctx(project)));
   }));
 
   // --- 风险与技术债 ---

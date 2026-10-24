@@ -52,6 +52,7 @@ function isUniqueViolation(error: unknown): boolean {
 // ============================================================
 // 工作包派生 — 差距账本 → 可执行工作包（只读）
 // 工作包是派生视图，不落库；claim/lease 是唯一运行时状态（r-ar1a）。
+// @sibom r-ea2b — 控制面只提供协议、边界契约与状态查询；调度、agent 运行时与模型路由归 harness workflow
 // ============================================================
 
 function gapIdentityOf(row: GapRowRecord): GapIdentity {
