@@ -1,3 +1,4 @@
+// @bom 认知访问层/MCP协议服务 — Streamable HTTP 传输与 /{slug}/mcp 路由
 /**
  * MCP Server with Streamable HTTP transport.
  * Routes: /{slug}/mcp — each slug gets a project-scoped MCP server.
@@ -68,11 +69,14 @@ function scheduleSessionCleanup(sid: string, entry: SessionEntry): void {
 // Exported handler
 // ============================================================
 
+// @sibom r-mp4d — 访问路径 /{slug}/mcp 区分项目；session 绑定 slug，跨项目复用即失效（404 重新初始化）
 const SLUG_PATTERN = /^\/([a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9])\/mcp$/;
 
 /**
  * Handle an incoming request on `/{slug}/mcp`.
  * Returns true if the request was handled, false if the path didn't match.
+ *
+ * @sibom r-mp1a — 标准 MCP Streamable HTTP 传输：POST/GET/DELETE + session 语义（未知 session 404 触发客户端重初始化）
  */
 export async function handleMcpRequest(
   req: IncomingMessage,

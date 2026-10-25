@@ -1,3 +1,4 @@
+// @bom 认知访问层/MCP协议服务 — MCP 工具面注册
 /**
  * Shared MCP tool registration.
  * Registers all si-beaver tools onto a given McpServer instance.
@@ -18,11 +19,14 @@ import {
   getRoadmap, witemProgress, decisionTrail, knowledgeMap,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   batchOperations,
+  BomBaselineInput, EvidenceReportInput, WaiverInput,
   type OperationContext,
 } from '../index.js';
 import type { ProjectManager } from '../projects/index.js';
 import { snakeToCamel } from '../api/transforms.js';
-import { listGaps } from '../gap/engine.js';
+import {
+  buildEvidenceScene, listGaps, reconcile, reportEvidence, setBaseline, signWaiversByCondition,
+} from '../gap/engine.js';
 import {
   claimWorkpack, confirmReplanProposal, listProposals, listWorkpacks,
   narrowWorkpackBoundary, proposeContractChange, proposeReplan,
@@ -248,6 +252,59 @@ function logged<A extends Record<string, unknown>>(
 }
 
 // ============================================================
+// 契约层 / Evidence 层 / GAP 层工具参数（与 REST 同源 schema）
+// ============================================================
+
+const BASELINE_SHAPE = {
+  commit: z.string().describe('BOM 基线 commit（vibespec@master HEAD）'),
+  requirements: z.array(z.object({
+    key: z.string().describe('需求键（domain/req）'),
+    title: z.string().describe('需求标题'),
+    rules: z.array(z.object({
+      id: z.string().describe('规则 ID（r-xxxx）'),
+      title: z.string().describe('规则标题'),
+    })).optional().describe('需求下的业务规则'),
+    deps: z.array(z.string()).optional().describe('需求依赖（跨域规范化键）'),
+  })).optional().describe('需求分区；缺省沿用旧基线'),
+  constraints: z.array(z.record(z.unknown())).optional().describe('约束分区；缺省沿用旧基线'),
+};
+
+const EVIDENCE_REPORT_SHAPE = {
+  items: z.array(z.object({
+    source_id: z.string().describe('证据源 ID：constraint:{id} / bom-tags / sibom-tags'),
+    payload: z.unknown().describe('证据载荷（constraint: {matched,total} 或 {value}；tags: {tags:[{key|id,file}]}）'),
+    reported_at: z.string().optional().describe('上报时间（ISO），缺省取服务器当前时间'),
+    baseline_commit: z.string().optional().describe('观测对照的基线 commit，缺省取当前基线'),
+  })).describe('证据项列表'),
+  constraints: z.array(z.record(z.unknown())).optional().describe('约束分区（先并入基线再重算）'),
+  commit: z.string().optional().describe('BOM commit（与 constraints 分区同报时必填语义）'),
+};
+
+const WAIVER_SHAPE = {
+  fingerprint: z.string().describe('差距条件指纹（evaluate_gap 行的 conditionFingerprint）'),
+  reason: z.string().describe('豁免原因'),
+  expires_at: z.string().nullable().optional().describe('过期时间（ISO）；null/缺省为永久'),
+};
+
+function parseBaseline(input: unknown) {
+  const parsed = BomBaselineInput.safeParse(input);
+  if (!parsed.success) throw new Error(`基线参数无效：${parsed.error.message}`);
+  return parsed.data;
+}
+
+function parseEvidenceReport(input: unknown) {
+  const parsed = EvidenceReportInput.safeParse(input);
+  if (!parsed.success) throw new Error(`证据参数无效：${parsed.error.message}`);
+  return parsed.data;
+}
+
+function parseWaiver(input: unknown) {
+  const parsed = WaiverInput.safeParse(input);
+  if (!parsed.success) throw new Error(`豁免参数无效：${parsed.error.message}`);
+  return parsed.data;
+}
+
+// ============================================================
 // Types
 // ============================================================
 
@@ -427,6 +484,47 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
   server.tool('evaluate_gap', '三方对账差距账单（违约/缺失/需求过时三型 + 在办 witem 标注 + 豁免）——判定仅由认知引擎统一计算', {
   }, log('evaluate_gap', async () => {
     return jsonResult(await listGaps(getCtx()));
+  }));
+
+  // --- 契约层基线 / Evidence 层 / GAP 层（差距查询之外：证据查询与检索、豁免、基线）---
+  // @sibom r-mp2b — MCP 工具面覆盖契约层（需求/规则查询与编辑）、Evidence 层（查询/检索/上报）、GAP 层（差距/豁免/基线）、组织层（工作包/认领/回传）与认知层（图谱读写）
+
+  server.tool('get_gap_baseline', '读取 GAP 基线：BOM commit + 需求/规则 + 约束快照（未设基线时返回 null）', {
+  }, log('get_gap_baseline', async () => {
+    const baseline = await getCtx().gap.getBaseline();
+    return jsonResult(baseline ?? { bom_commit: null, bom: null, updated_at: null });
+  }));
+
+  server.tool('set_gap_baseline', '上报 BOM 快照作为 GAP 基线（requirements/constraints 可分区分批上报）并重算差距', BASELINE_SHAPE, log('set_gap_baseline', async (args) => {
+    return jsonResult(await setBaseline(getCtx(), parseBaseline(args)));
+  }));
+
+  server.tool('report_evidence', '上报证据项（constraint:{id} / bom-tags / sibom-tags）并增量重算差距', EVIDENCE_REPORT_SHAPE, log('report_evidence', async (args) => {
+    return jsonResult(await reportEvidence(getCtx(), parseEvidenceReport(args)));
+  }));
+
+  server.tool('get_evidence_scene', '按需求键聚合证据对照视图（文件 @bom 标签 / 约束运行结果 / sibs 节点）', {
+    requirement_key: z.string().describe('需求键（domain/req）'),
+  }, log('get_evidence_scene', async (args) => {
+    return jsonResult(await buildEvidenceScene(getCtx(), args.requirement_key));
+  }));
+
+  server.tool('get_evidence_history', '按证据源 ID 追溯证据上报历史（append-only）', {
+    source_id: z.string().describe('证据源 ID：constraint:{id} / bom-tags / sibom-tags'),
+  }, log('get_evidence_history', async (args) => {
+    return jsonResult(await getCtx().gap.getEvidenceHistory(args.source_id));
+  }));
+
+  server.tool('sign_gap_waiver', '按差距条件指纹签豁免（仅静默，不关闭差距；条件或证据源变化即失效）', WAIVER_SHAPE, log('sign_gap_waiver', async (args) => {
+    const input = parseWaiver(args);
+    const count = await signWaiversByCondition(getCtx(), input.fingerprint, input.reason, input.expires_at ?? null);
+    if (count === 0) throw new Error('无匹配的 open 差距行');
+    return jsonResult({ ok: true, waived: count });
+  }));
+
+  server.tool('reconcile_gap', '按当前基线 + 证据全量重算差距账本', {
+  }, log('reconcile_gap', async () => {
+    return jsonResult(await reconcile(getCtx()));
   }));
 
   server.tool('list_workpacks', '派生工作包：按需求键聚拢开放差距，输出边界契约、依赖、并行组与验收判据（只读）', {
@@ -854,6 +952,59 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     project: projectParam,
   }, log('evaluate_gap', async ({ project }) => {
     return jsonResult(await listGaps(await ctx(project)));
+  }));
+
+  // --- 契约层基线 / Evidence 层 / GAP 层（全局模式：带可选 project 参数）---
+
+  server.tool('get_gap_baseline', '读取 GAP 基线：BOM commit + 需求/规则 + 约束快照（未设基线时返回 null）', {
+    project: projectParam,
+  }, log('get_gap_baseline', async ({ project }) => {
+    const baseline = await (await ctx(project)).gap.getBaseline();
+    return jsonResult(baseline ?? { bom_commit: null, bom: null, updated_at: null });
+  }));
+
+  server.tool('set_gap_baseline', '上报 BOM 快照作为 GAP 基线（requirements/constraints 可分区分批上报）并重算差距', {
+    project: projectParam,
+    ...BASELINE_SHAPE,
+  }, log('set_gap_baseline', async ({ project, ...args }) => {
+    return jsonResult(await setBaseline(await ctx(project), parseBaseline(args)));
+  }));
+
+  server.tool('report_evidence', '上报证据项（constraint:{id} / bom-tags / sibom-tags）并增量重算差距', {
+    project: projectParam,
+    ...EVIDENCE_REPORT_SHAPE,
+  }, log('report_evidence', async ({ project, ...args }) => {
+    return jsonResult(await reportEvidence(await ctx(project), parseEvidenceReport(args)));
+  }));
+
+  server.tool('get_evidence_scene', '按需求键聚合证据对照视图（文件 @bom 标签 / 约束运行结果 / sibs 节点）', {
+    project: projectParam,
+    requirement_key: z.string().describe('需求键（domain/req）'),
+  }, log('get_evidence_scene', async ({ project, requirement_key }) => {
+    return jsonResult(await buildEvidenceScene(await ctx(project), requirement_key));
+  }));
+
+  server.tool('get_evidence_history', '按证据源 ID 追溯证据上报历史（append-only）', {
+    project: projectParam,
+    source_id: z.string().describe('证据源 ID：constraint:{id} / bom-tags / sibom-tags'),
+  }, log('get_evidence_history', async ({ project, source_id }) => {
+    return jsonResult(await (await ctx(project)).gap.getEvidenceHistory(source_id));
+  }));
+
+  server.tool('sign_gap_waiver', '按差距条件指纹签豁免（仅静默，不关闭差距；条件或证据源变化即失效）', {
+    project: projectParam,
+    ...WAIVER_SHAPE,
+  }, log('sign_gap_waiver', async ({ project, ...args }) => {
+    const input = parseWaiver(args);
+    const count = await signWaiversByCondition(await ctx(project), input.fingerprint, input.reason, input.expires_at ?? null);
+    if (count === 0) throw new Error('无匹配的 open 差距行');
+    return jsonResult({ ok: true, waived: count });
+  }));
+
+  server.tool('reconcile_gap', '按当前基线 + 证据全量重算差距账本', {
+    project: projectParam,
+  }, log('reconcile_gap', async ({ project }) => {
+    return jsonResult(await reconcile(await ctx(project)));
   }));
 
   server.tool('list_workpacks', '派生工作包：按需求键聚拢开放差距，输出边界契约、依赖、并行组与验收判据（只读）', {

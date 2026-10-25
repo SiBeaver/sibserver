@@ -1,3 +1,4 @@
+// @bom 认知访问层/MCP协议服务 — stdio MCP server（全局模式）
 /**
  * MCP Server with stdio transport (for local CLI usage).
  * Exposes all tools with an optional project param (global mode).
@@ -24,6 +25,7 @@ registerTools(server, { mode: 'global', manager });
 // Start
 // ============================================================
 
+// @sibom r-mp1a — stdio 传输承载标准 MCP 协议，本地 CLI 无需定制客户端即可接入
 async function main() {
   await manager.init();
   const transport = new StdioServerTransport();

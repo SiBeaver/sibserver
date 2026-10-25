@@ -1,3 +1,4 @@
+// @bom 认知访问层/MCP协议服务 — REST/MCP Bearer 认证与项目路由
 import { createServer } from 'node:http';
 import { timingSafeEqual, createHash } from 'node:crypto';
 import { Hono } from 'hono';
@@ -72,6 +73,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.use('/api/*', cors());
   app.use('/:project/api/*', cors());
 
+  // @sibom r-mp3c — Bearer Token 认证：REST 与 MCP 路由统一校验；未配置 AUTH_TOKEN/SI_BEAVER_AUTH_TOKEN 时开放内网访问
   if (authToken) {
     const authMw = async (c: any, next: any) => {
       const provided = c.req.header('Authorization') ?? '';
@@ -817,6 +819,7 @@ async function start() {
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', '*');
 
+      // @sibom r-mp3c — MCP 路由同样要求 Bearer Token；未配置认证时开放内网访问
       if (authToken) {
         const auth = req.headers['authorization'];
         if (auth !== `Bearer ${authToken}`) {

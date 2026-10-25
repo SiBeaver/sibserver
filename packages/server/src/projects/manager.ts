@@ -1,3 +1,4 @@
+// @bom 认知访问层/MCP协议服务 — 按 slug 隔离项目上下文
 import { getPool, type Sql, OperationContext } from '../index.js';
 import { Registry } from './registry.js';
 import type { ProjectMeta, CreateProjectInput, UpdateProjectInput } from './types.js';
@@ -17,6 +18,7 @@ export class ProjectManager {
     this.initialized = true;
   }
 
+  // @sibom r-mp4d — 项目间数据隔离：每个 slug 绑定独立 OperationContext（独立 project_id 存储分区）
   getContext(slug: string): OperationContext {
     const existing = this.contexts.get(slug);
     if (existing) return existing;
