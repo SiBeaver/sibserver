@@ -147,10 +147,34 @@ describe('责任认领（claims）', () => {
     declared.escalation = ['契约变更经提案'];
     const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], declared));
 
+    const dropReadOnly: BoundaryDeclaration = {
+      fact_types: [{ type: 'code', scopes: ['src/a/'] }],
+      read_only: [],
+      escalation: ['契约变更经提案'],
+    };
     await expect(narrowClaimBoundary(ctx, claim.id, {
       executor: 'agent-1',
-      boundary: boundary(['src/a/']),
+      boundary: dropReadOnly,
     })).rejects.toMatchObject({ status: 409 });
+
+    const dropEscalation: BoundaryDeclaration = {
+      fact_types: [{ type: 'code', scopes: ['src/a/'] }],
+      read_only: ['src/a/secret/'],
+      escalation: [],
+    };
+    await expect(narrowClaimBoundary(ctx, claim.id, {
+      executor: 'agent-1',
+      boundary: dropEscalation,
+    })).rejects.toMatchObject({ status: 409 });
+
+    const kept: BoundaryDeclaration = {
+      fact_types: [{ type: 'code', scopes: ['src/a/sub/'] }],
+      read_only: ['src/a/secret/'],
+      escalation: ['契约变更经提案'],
+    };
+    const narrowed = await narrowClaimBoundary(ctx, claim.id, { executor: 'agent-1', boundary: kept });
+    expect(narrowed.boundary.fact_types).toEqual([{ type: 'code', scopes: ['src/a/sub/'] }]);
+    expect(narrowed.boundary.read_only).toEqual(['src/a/secret/']);
   });
 
   it('契约提案经基线前移转为 confirmed，认领同时作废', async () => {
