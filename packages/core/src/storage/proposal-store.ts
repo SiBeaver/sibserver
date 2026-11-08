@@ -8,6 +8,7 @@ import type { ProposalKind, ProposalStatus, ProposalView } from '../workpack/typ
 export interface ProposalRecord {
   id: string;
   workpack_id: string | null;
+  claim_id: string | null;
   kind: ProposalKind;
   proposer: string;
   requirement_keys: string[];
@@ -32,6 +33,7 @@ function rowToProposal(row: Record<string, unknown>): ProposalRecord {
   return {
     id: String(row.id),
     workpack_id: optionalString(row.workpack_id),
+    claim_id: optionalString(row.claim_id),
     kind: row.kind as ProposalKind,
     proposer: String(row.proposer),
     requirement_keys: Array.isArray(row.requirement_keys) ? row.requirement_keys.map(String) : [],
@@ -49,6 +51,7 @@ export function toProposalView(record: ProposalRecord): ProposalView {
   return {
     id: record.id,
     workpack_id: record.workpack_id,
+    claim_id: record.claim_id,
     kind: record.kind,
     proposer: record.proposer,
     requirement_keys: record.requirement_keys,
@@ -68,10 +71,10 @@ export class ProposalStore {
   async insertProposal(record: ProposalRecord): Promise<void> {
     await this.sql`
       INSERT INTO workpack_proposals
-        (id, project_id, workpack_id, kind, proposer, requirement_keys, summary, detail,
+        (id, project_id, workpack_id, claim_id, kind, proposer, requirement_keys, summary, detail,
          status, created_at, confirmed_commit, confirmed_by, resolved_at)
       VALUES
-        (${record.id}, ${this.projectId}, ${record.workpack_id}, ${record.kind},
+        (${record.id}, ${this.projectId}, ${record.workpack_id}, ${record.claim_id}, ${record.kind},
          ${record.proposer}, ${record.requirement_keys}, ${record.summary},
          ${this.sql.json(record.detail as JsonbParam)},
          ${record.status}, ${record.created_at}, ${record.confirmed_commit},

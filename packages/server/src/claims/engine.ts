@@ -1,5 +1,5 @@
 import { ulid } from 'ulidx';
-import { DOMAIN_FACT_TYPES, PROPOSAL_ONLY_FACT_TYPES } from '@sibeaver/core';
+import { DOMAIN_FACT_TYPES, PROPOSAL_ONLY_FACT_TYPES, toProposalView } from '@sibeaver/core';
 import type {
   BoundaryDeclaration,
   ClaimCreateInput,
@@ -9,8 +9,11 @@ import type {
   ClaimRevokeInput,
   ClaimRenewInput,
   ClaimStatus,
+  ContractProposalInput,
   FactType,
   OperationContext,
+  ProposalRecord,
+  ProposalView,
   ResponsibilityClaimRecord,
 } from '@sibeaver/core';
 import { fingerprint } from '../gap/engine.js';
@@ -152,6 +155,7 @@ export async function listClaims(
 }
 
 export async function getClaim(ctx: OperationContext, id: string): Promise<ResponsibilityClaimRecord> {
+  await ctx.claims.expireStale(new Date().toISOString());
   const claim = await ctx.claims.getClaim(id);
   if (!claim) throw new ClaimError('认领不存在', 404);
   return claim;
@@ -222,6 +226,10 @@ export async function reportClaim(
   const outOfScope: string[] = [];
   const proposalOnly: string[] = [];
   for (const fact of input.changed_facts) {
+    if (claim.boundary.read_only.some(scope => scopeContains(scope, fact.path))) {
+      outOfScope.push(fact.path);
+      continue;
+    }
     const matched = matchFact(claim, fact.type, fact.path);
     if (matched === null) {
       outOfScope.push(fact.path);
@@ -283,4 +291,41 @@ export async function narrowClaimBoundary(
 
   await ctx.claims.updateBoundary(id, input.boundary);
   return { ...claim, boundary: input.boundary, heartbeat_at: claim.heartbeat_at };
+}
+
+// @sibom r-bc2b — 契约子树写入仅限提案：认领提供提案通道，不直接改契约
+// @sibom r-ar4d — 契约变更只能提案；确认由基线前移产生
+export async function proposeClaimContractChange(
+  ctx: OperationContext,
+  id: string,
+  input: ContractProposalInput,
+): Promise<ProposalView> {
+  const now = new Date().toISOString();
+  await ctx.claims.expireStale(now);
+  const claim = await ctx.claims.getActiveClaim(id);
+  if (!claim || claim.executor !== input.proposer) {
+    throw new ClaimError('无有效认领或提案者不匹配', 409);
+  }
+  const invalid = input.requirement_keys.filter(key => !claim.requirement_keys.includes(key));
+  if (invalid.length > 0) {
+    throw new ClaimError(`提案需求键不在认领责任范围：${invalid.join(', ')}`, 409);
+  }
+
+  const record: ProposalRecord = {
+    id: ulid(),
+    workpack_id: null,
+    claim_id: id,
+    kind: 'contract',
+    proposer: input.proposer,
+    requirement_keys: [...new Set(input.requirement_keys)].sort(),
+    summary: input.summary,
+    detail: input.detail ?? {},
+    status: 'proposed',
+    created_at: now,
+    confirmed_commit: null,
+    confirmed_by: null,
+    resolved_at: null,
+  };
+  await ctx.proposals.insertProposal(record);
+  return toProposalView(record);
 }

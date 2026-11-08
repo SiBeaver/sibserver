@@ -131,6 +131,7 @@ export type ProposalStatus = z.infer<typeof ProposalStatus>;
 export const ProposalView = z.object({
   id: z.string(),
   workpack_id: z.string().nullable(),
+  claim_id: z.string().nullable(),
   kind: ProposalKind,
   proposer: z.string(),
   requirement_keys: z.array(z.string()),

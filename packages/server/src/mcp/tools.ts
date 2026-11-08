@@ -35,7 +35,7 @@ import {
 import { listExecutors, registerExecutor } from '../executor/engine.js';
 import {
   createClaim, getClaim, listClaims, narrowClaimBoundary,
-  releaseClaim, renewClaim, reportClaim, revokeClaim,
+  proposeClaimContractChange, releaseClaim, renewClaim, reportClaim, revokeClaim,
 } from '../claims/engine.js';
 
 /** Wrap result: apply camelCase transform + JSON serialize for MCP text output */
@@ -682,7 +682,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
   server.tool('report_claim', '上报执行改动并做事实边界检查；越界即失败并记录证据', {
     claim_id: z.string().describe('认领 ID'),
     executor: z.string().describe('执行者标识'),
-    changed_facts: z.array(z.object(CLAIM_CHANGED_FACT_SHAPE)).describe('本次执行改变的实事集合'),
+    changed_facts: z.array(z.object(CLAIM_CHANGED_FACT_SHAPE)).describe('本次执行改变的事实集合'),
     incomplete_reason: z.string().optional(),
   }, log('report_claim', async (args) => {
     return jsonResult(await reportClaim(getCtx(), args.claim_id, {
@@ -700,6 +700,21 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await narrowClaimBoundary(getCtx(), args.claim_id, {
       executor: args.executor,
       boundary: args.boundary,
+    }));
+  }));
+
+  server.tool('propose_claim_contract_change', '提交契约变更提案（契约子树写入只提案）；基线前移即人确认', {
+    claim_id: z.string().describe('认领 ID'),
+    proposer: z.string().describe('提案者（须为该认领执行者）'),
+    summary: z.string().describe('变更摘要'),
+    requirement_keys: z.array(z.string()).min(1).describe('受影响需求键（须在认领责任范围内）'),
+    detail: z.unknown().optional(),
+  }, log('propose_claim_contract_change', async (args) => {
+    return jsonResult(await proposeClaimContractChange(getCtx(), args.claim_id, {
+      proposer: args.proposer,
+      summary: args.summary,
+      requirement_keys: args.requirement_keys,
+      detail: args.detail,
     }));
   }));
 
@@ -1264,7 +1279,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     project: projectParam,
     claim_id: z.string().describe('认领 ID'),
     executor: z.string().describe('执行者标识'),
-    changed_facts: z.array(z.object(CLAIM_CHANGED_FACT_SHAPE)).describe('本次执行改变的实事集合'),
+    changed_facts: z.array(z.object(CLAIM_CHANGED_FACT_SHAPE)).describe('本次执行改变的事实集合'),
     incomplete_reason: z.string().optional(),
   }, log('report_claim', async ({ project, ...args }) => {
     return jsonResult(await reportClaim(await ctx(project), args.claim_id, {
@@ -1283,6 +1298,22 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await narrowClaimBoundary(await ctx(project), args.claim_id, {
       executor: args.executor,
       boundary: args.boundary,
+    }));
+  }));
+
+  server.tool('propose_claim_contract_change', '提交契约变更提案（契约子树写入只提案）；基线前移即人确认', {
+    project: projectParam,
+    claim_id: z.string().describe('认领 ID'),
+    proposer: z.string().describe('提案者（须为该认领执行者）'),
+    summary: z.string().describe('变更摘要'),
+    requirement_keys: z.array(z.string()).min(1).describe('受影响需求键（须在认领责任范围内）'),
+    detail: z.unknown().optional(),
+  }, log('propose_claim_contract_change', async ({ project, ...args }) => {
+    return jsonResult(await proposeClaimContractChange(await ctx(project), args.claim_id, {
+      proposer: args.proposer,
+      summary: args.summary,
+      requirement_keys: args.requirement_keys,
+      detail: args.detail,
     }));
   }));
 

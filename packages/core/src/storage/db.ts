@@ -302,6 +302,8 @@ CREATE TABLE IF NOT EXISTS workpack_proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_workpack_proposals_status
   ON workpack_proposals(project_id, status, created_at);
+-- 责任认领的契约提案（r-bc2b：契约子树写入仅限提案）
+ALTER TABLE workpack_proposals ADD COLUMN IF NOT EXISTS claim_id TEXT;
 
 -- 执行者画像：声明性能力记录（不路由模型，不做分派匹配）
 CREATE TABLE IF NOT EXISTS executor_profiles (

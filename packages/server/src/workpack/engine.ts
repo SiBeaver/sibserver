@@ -531,6 +531,7 @@ export async function proposeContractChange(
   const record: ProposalRecord = {
     id: ulid(),
     workpack_id: workpackId,
+    claim_id: null,
     kind: 'contract',
     proposer: input.proposer,
     requirement_keys: [...new Set(input.requirement_keys)].sort(),
@@ -555,6 +556,7 @@ export async function proposeReplan(
   const record: ProposalRecord = {
     id: ulid(),
     workpack_id: null,
+    claim_id: null,
     kind: 'replan',
     proposer: input.proposer,
     requirement_keys: [],

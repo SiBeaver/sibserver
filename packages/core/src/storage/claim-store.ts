@@ -77,6 +77,23 @@ export class ClaimStore {
     return rows.length;
   }
 
+  // @sibom r-ar2b — 责任范围定义变化即旧认领作废，交还需求键
+  async expireByKeys(keys: string[], now: string): Promise<number> {
+    if (keys.length === 0) return 0;
+    const rows = await this.sql`
+      WITH hit AS (
+        UPDATE claims SET status = 'expired', released_at = ${now}
+        WHERE project_id = ${this.projectId} AND status = 'active' AND requirement_keys && ${keys}
+        RETURNING id
+      )
+      UPDATE claim_keys SET status = 'expired'
+      WHERE project_id = ${this.projectId} AND status = 'active'
+        AND claim_id IN (SELECT id FROM hit)
+      RETURNING claim_id
+    `;
+    return rows.length;
+  }
+
   async insertClaim(claim: ResponsibilityClaimRecord): Promise<void> {
     await this.sql`
       INSERT INTO claims

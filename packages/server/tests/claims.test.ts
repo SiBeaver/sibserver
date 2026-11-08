@@ -4,8 +4,9 @@ import { OperationContext } from '@sibeaver/core';
 import type { BomSnapshot, BoundaryDeclaration, ClaimCreateInput, Sql } from '@sibeaver/core';
 import {
   ClaimError, createClaim, getClaim, listClaims, narrowClaimBoundary,
-  releaseClaim, renewClaim, reportClaim, revokeClaim,
+  proposeClaimContractChange, releaseClaim, renewClaim, reportClaim, revokeClaim,
 } from '../src/claims/engine.js';
+import { setBaseline } from '../src/gap/engine.js';
 
 const NOW = '2026-08-20T00:00:00.000Z';
 
@@ -162,5 +163,50 @@ describe('责任认领（claims）', () => {
     expect(revoked.status).toBe('revoked');
     expect(revoked.revoked_reason).toContain('需求变更');
     expect((await listClaims(ctx)).length).toBe(0);
+  });
+
+  it('基线前移导致责任范围变化时旧认领作废', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+    const changed = bom();
+    changed.commit = 'b2';
+    changed.requirements[0] = { ...changed.requirements[0], title: '需求A（修订）' };
+    await setBaseline(ctx, {
+      commit: 'b2',
+      requirements: changed.requirements,
+      constraints: changed.constraints,
+    });
+
+    expect((await getClaim(ctx, claim.id)).status).toBe('expired');
+    const again = await createClaim(ctx, claimInput('agent-2', ['dom/a'], boundary(['src/a/'])));
+    expect(again.executor).toBe('agent-2');
+  });
+
+  it('只读范围不可写，写入即越界', async () => {
+    const declared = boundary(['src/a/']);
+    declared.read_only = ['src/a/secret/'];
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], declared));
+    const result = await reportClaim(ctx, claim.id, {
+      executor: 'agent-1',
+      changed_facts: [{ path: 'src/a/secret/token.ts' }, { path: 'src/a/main.ts' }],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.out_of_scope).toEqual(['src/a/secret/token.ts']);
+  });
+
+  it('契约子树写入走提案通道，确认由基线前移产生', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a', 'dom/b'], boundary(['src/a/'])));
+    const proposal = await proposeClaimContractChange(ctx, claim.id, {
+      proposer: 'agent-1',
+      summary: '补充判据',
+      requirement_keys: ['dom/a'],
+    });
+    expect(proposal.claim_id).toBe(claim.id);
+    expect(proposal.status).toBe('proposed');
+
+    await expect(proposeClaimContractChange(ctx, claim.id, {
+      proposer: 'agent-1',
+      summary: '越范围',
+      requirement_keys: ['dom/c'],
+    })).rejects.toMatchObject({ status: 409 });
   });
 });

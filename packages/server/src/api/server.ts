@@ -33,7 +33,7 @@ import {
 import { listExecutors, registerExecutor } from '../executor/engine.js';
 import {
   ClaimError, createClaim, getClaim, listClaims, narrowClaimBoundary,
-  releaseClaim, renewClaim, reportClaim, revokeClaim,
+  proposeClaimContractChange, releaseClaim, renewClaim, reportClaim, revokeClaim,
 } from '../claims/engine.js';
 import {
   BomBaselineInput, ClaimInput, ClaimCreateInput, ClaimNarrowInput, ClaimReleaseInput,
@@ -358,6 +358,17 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
     try {
       return json(c, await narrowClaimBoundary(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/claims/:id/proposals', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ContractProposalInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await proposeClaimContractChange(getCtx(slug), c.req.param('id'), parsed.data), 201);
     } catch (e: any) {
       return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
     }

@@ -370,6 +370,8 @@ export async function setBaseline(
   await ctx.gap.setBaseline(bom, now);
 
   const changedKeys = diffBomKeys(old.bom, bom);
+  // @sibom r-ar2b — 责任范围定义变化：旧认领作废，需求键回到可领取
+  await ctx.claims.expireByKeys([...changedKeys], now);
   // @sibom r-ar4d — 契约提案经人确认：基线前移且目标需求键变化即确认（commit 即确认）
   await ctx.proposals.confirmByChangedKeys(bom.commit, [...changedKeys], now);
   const openBefore = await ctx.gap.getOpenRows();
