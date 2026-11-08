@@ -141,6 +141,39 @@ describe('责任认领（claims）', () => {
     })).rejects.toMatchObject({ status: 409 });
   });
 
+  it('收窄不得删除只读范围或升级规则', async () => {
+    const declared = boundary(['src/a/']);
+    declared.read_only = ['src/a/secret/'];
+    declared.escalation = ['契约变更经提案'];
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], declared));
+
+    await expect(narrowClaimBoundary(ctx, claim.id, {
+      executor: 'agent-1',
+      boundary: boundary(['src/a/']),
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('契约提案经基线前移转为 confirmed，认领同时作废', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+    const proposal = await proposeClaimContractChange(ctx, claim.id, {
+      proposer: 'agent-1',
+      summary: '补充判据',
+      requirement_keys: ['dom/a'],
+    });
+
+    const changed = bom();
+    changed.commit = 'b3';
+    changed.requirements[0] = { ...changed.requirements[0], title: '需求A（再修订）' };
+    await setBaseline(ctx, {
+      commit: 'b3',
+      requirements: changed.requirements,
+      constraints: changed.constraints,
+    });
+
+    expect((await ctx.proposals.getProposal(proposal.id))?.status).toBe('confirmed');
+    expect((await getClaim(ctx, claim.id)).status).toBe('expired');
+  });
+
   it('租约过期后需求键回到可领取，失效认领保留痕迹', async () => {
     const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
     await sql`UPDATE claims SET lease_expires_at = '2000-01-01T00:00:00.000Z' WHERE project_id = 'default'`;

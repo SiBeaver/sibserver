@@ -289,6 +289,17 @@ export async function narrowClaimBoundary(
     throw new ClaimError(`边界只能收窄；以下范围超出当前边界（放宽须人确认）：${widened.join(', ')}`, 409);
   }
 
+  const droppedReadOnly = claim.boundary.read_only
+    .filter(scope => !input.boundary.read_only.some(next => scopeContains(next, scope)));
+  if (droppedReadOnly.length > 0) {
+    throw new ClaimError(`收窄不得删除只读范围（放宽须人确认）：${droppedReadOnly.join(', ')}`, 409);
+  }
+  const droppedEscalation = claim.boundary.escalation
+    .filter(rule => !input.boundary.escalation.includes(rule));
+  if (droppedEscalation.length > 0) {
+    throw new ClaimError(`收窄不得删除升级规则（放宽须人确认）：${droppedEscalation.join('；')}`, 409);
+  }
+
   await ctx.claims.updateBoundary(id, input.boundary);
   return { ...claim, boundary: input.boundary, heartbeat_at: claim.heartbeat_at };
 }
