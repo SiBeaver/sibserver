@@ -33,6 +33,10 @@ import {
   releaseWorkpack, renewWorkpack, reportWorkpack,
 } from '../workpack/engine.js';
 import { listExecutors, registerExecutor } from '../executor/engine.js';
+import {
+  createClaim, getClaim, listClaims, narrowClaimBoundary,
+  releaseClaim, renewClaim, reportClaim, revokeClaim,
+} from '../claims/engine.js';
 
 /** Wrap result: apply camelCase transform + JSON serialize for MCP text output */
 function jsonResult(data: unknown) {
@@ -284,6 +288,35 @@ const WAIVER_SHAPE = {
   fingerprint: z.string().describe('差距条件指纹（evaluate_gap 行的 conditionFingerprint）'),
   reason: z.string().describe('豁免原因'),
   expires_at: z.string().nullable().optional().describe('过期时间（ISO）；null/缺省为永久'),
+};
+
+const CLAIM_FACT_TYPES = ['code', 'artifact', 'contract', 'service', 'host', 'config', 'runtime_contract'] as const;
+
+const CLAIM_BOUNDARY_SHAPE = {
+  fact_types: z.array(z.object({
+    type: z.enum(CLAIM_FACT_TYPES),
+    scopes: z.array(z.string().min(1)).min(1),
+  })).min(1).describe('域级事实类型与可写范围'),
+  read_only: z.array(z.string()).default([]),
+  escalation: z.array(z.string()).default([]),
+};
+
+const CLAIM_PREAUTH_SHAPE = {
+  autonomous_actions: z.array(z.string()).default([]),
+  prohibited: z.array(z.string()).default([]),
+  default_assumptions: z.array(z.string()).default([]),
+  must_stop_conditions: z.array(z.string()).default([]),
+};
+
+const CLAIM_SESSION_SHAPE = {
+  host: z.string().min(1),
+  workspace: z.string().min(1),
+  native_id: z.string().optional(),
+};
+
+const CLAIM_CHANGED_FACT_SHAPE = {
+  type: z.enum(CLAIM_FACT_TYPES).optional(),
+  path: z.string().min(1),
 };
 
 function parseBaseline(input: unknown) {
@@ -578,6 +611,95 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await narrowWorkpackBoundary(getCtx(), args.workpack_id, {
       executor: args.executor,
       writable: args.writable,
+    }));
+  }));
+
+  // === 责任认领（claims）===
+
+  server.tool('list_claims', '列出责任认领（默认活跃）；按需求键互斥并携带边界声明与租约', {
+    status: z.enum(['active', 'released', 'revoked', 'expired', 'failed']).optional().describe('认领状态（缺省 active）'),
+  }, log('list_claims', async (args) => {
+    return jsonResult(await listClaims(getCtx(), args.status ?? 'active'));
+  }));
+
+  server.tool('get_claim', '读取单个责任认领（边界声明、预授权、会话引用与租约状态）', {
+    claim_id: z.string().describe('认领 ID'),
+  }, log('get_claim', async (args) => {
+    return jsonResult(await getClaim(getCtx(), args.claim_id));
+  }));
+
+  server.tool('create_claim', '按责任范围建立认领：边界声明随认领提交，按需求键先到先得', {
+    executor: z.string().describe('执行者标识'),
+    requirement_keys: z.array(z.string()).min(1).describe('责任范围（需求键集合）'),
+    domain: z.enum(['build', 'runtime']).default('build'),
+    boundary: z.object(CLAIM_BOUNDARY_SHAPE),
+    pre_authorization: z.object(CLAIM_PREAUTH_SHAPE).optional(),
+    isolation_mode: z.enum(['worktree', 'workspace']),
+    isolation_id: z.string().describe('隔离标识（worktree 路径 / 工作区 ID）'),
+    session_ref: z.object(CLAIM_SESSION_SHAPE).optional(),
+  }, log('create_claim', async (args) => {
+    return jsonResult(await createClaim(getCtx(), {
+      executor: args.executor,
+      requirement_keys: args.requirement_keys,
+      domain: args.domain,
+      boundary: args.boundary,
+      pre_authorization: args.pre_authorization,
+      isolation_mode: args.isolation_mode,
+      isolation_id: args.isolation_id,
+      session_ref: args.session_ref,
+    }));
+  }));
+
+  server.tool('renew_claim', '续租责任认领（心跳）', {
+    claim_id: z.string().describe('认领 ID'),
+    executor: z.string().describe('执行者标识'),
+  }, log('renew_claim', async (args) => {
+    return jsonResult(await renewClaim(getCtx(), args.claim_id, { executor: args.executor }));
+  }));
+
+  server.tool('release_claim', '释放责任认领，需求键回到可领取', {
+    claim_id: z.string().describe('认领 ID'),
+    executor: z.string().describe('执行者标识'),
+    reason: z.string().optional(),
+  }, log('release_claim', async (args) => {
+    return jsonResult(await releaseClaim(getCtx(), args.claim_id, {
+      executor: args.executor,
+      reason: args.reason,
+    }));
+  }));
+
+  server.tool('revoke_claim', '撤销责任认领（协作式停止，记录原因）；需求键回到可领取', {
+    claim_id: z.string().describe('认领 ID'),
+    revoked_by: z.string().describe('撤销发起方'),
+    reason: z.string().describe('撤销原因'),
+  }, log('revoke_claim', async (args) => {
+    return jsonResult(await revokeClaim(getCtx(), args.claim_id, {
+      revoked_by: args.revoked_by,
+      reason: args.reason,
+    }));
+  }));
+
+  server.tool('report_claim', '上报执行改动并做事实边界检查；越界即失败并记录证据', {
+    claim_id: z.string().describe('认领 ID'),
+    executor: z.string().describe('执行者标识'),
+    changed_facts: z.array(z.object(CLAIM_CHANGED_FACT_SHAPE)).describe('本次执行改变的实事集合'),
+    incomplete_reason: z.string().optional(),
+  }, log('report_claim', async (args) => {
+    return jsonResult(await reportClaim(getCtx(), args.claim_id, {
+      executor: args.executor,
+      changed_facts: args.changed_facts,
+      incomplete_reason: args.incomplete_reason,
+    }));
+  }));
+
+  server.tool('narrow_claim_boundary', '收窄认领的事实边界；放宽会被拒绝，须人确认', {
+    claim_id: z.string().describe('认领 ID'),
+    executor: z.string().describe('执行者标识'),
+    boundary: z.object(CLAIM_BOUNDARY_SHAPE).describe('收窄后的边界声明（必须是当前边界的子集）'),
+  }, log('narrow_claim_boundary', async (args) => {
+    return jsonResult(await narrowClaimBoundary(getCtx(), args.claim_id, {
+      executor: args.executor,
+      boundary: args.boundary,
     }));
   }));
 
@@ -1064,6 +1186,103 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await narrowWorkpackBoundary(await ctx(project), args.workpack_id, {
       executor: args.executor,
       writable: args.writable,
+    }));
+  }));
+
+  // === 责任认领（claims）===
+
+  server.tool('list_claims', '列出责任认领（默认活跃）；按需求键互斥并携带边界声明与租约', {
+    project: projectParam,
+    status: z.enum(['active', 'released', 'revoked', 'expired', 'failed']).optional().describe('认领状态（缺省 active）'),
+  }, log('list_claims', async ({ project, ...args }) => {
+    return jsonResult(await listClaims(await ctx(project), args.status ?? 'active'));
+  }));
+
+  server.tool('get_claim', '读取单个责任认领（边界声明、预授权、会话引用与租约状态）', {
+    project: projectParam,
+    claim_id: z.string().describe('认领 ID'),
+  }, log('get_claim', async ({ project, ...args }) => {
+    return jsonResult(await getClaim(await ctx(project), args.claim_id));
+  }));
+
+  server.tool('create_claim', '按责任范围建立认领：边界声明随认领提交，按需求键先到先得', {
+    project: projectParam,
+    executor: z.string().describe('执行者标识'),
+    requirement_keys: z.array(z.string()).min(1).describe('责任范围（需求键集合）'),
+    domain: z.enum(['build', 'runtime']).default('build'),
+    boundary: z.object(CLAIM_BOUNDARY_SHAPE),
+    pre_authorization: z.object(CLAIM_PREAUTH_SHAPE).optional(),
+    isolation_mode: z.enum(['worktree', 'workspace']),
+    isolation_id: z.string().describe('隔离标识（worktree 路径 / 工作区 ID）'),
+    session_ref: z.object(CLAIM_SESSION_SHAPE).optional(),
+  }, log('create_claim', async ({ project, ...args }) => {
+    return jsonResult(await createClaim(await ctx(project), {
+      executor: args.executor,
+      requirement_keys: args.requirement_keys,
+      domain: args.domain,
+      boundary: args.boundary,
+      pre_authorization: args.pre_authorization,
+      isolation_mode: args.isolation_mode,
+      isolation_id: args.isolation_id,
+      session_ref: args.session_ref,
+    }));
+  }));
+
+  server.tool('renew_claim', '续租责任认领（心跳）', {
+    project: projectParam,
+    claim_id: z.string().describe('认领 ID'),
+    executor: z.string().describe('执行者标识'),
+  }, log('renew_claim', async ({ project, ...args }) => {
+    return jsonResult(await renewClaim(await ctx(project), args.claim_id, { executor: args.executor }));
+  }));
+
+  server.tool('release_claim', '释放责任认领，需求键回到可领取', {
+    project: projectParam,
+    claim_id: z.string().describe('认领 ID'),
+    executor: z.string().describe('执行者标识'),
+    reason: z.string().optional(),
+  }, log('release_claim', async ({ project, ...args }) => {
+    return jsonResult(await releaseClaim(await ctx(project), args.claim_id, {
+      executor: args.executor,
+      reason: args.reason,
+    }));
+  }));
+
+  server.tool('revoke_claim', '撤销责任认领（协作式停止，记录原因）；需求键回到可领取', {
+    project: projectParam,
+    claim_id: z.string().describe('认领 ID'),
+    revoked_by: z.string().describe('撤销发起方'),
+    reason: z.string().describe('撤销原因'),
+  }, log('revoke_claim', async ({ project, ...args }) => {
+    return jsonResult(await revokeClaim(await ctx(project), args.claim_id, {
+      revoked_by: args.revoked_by,
+      reason: args.reason,
+    }));
+  }));
+
+  server.tool('report_claim', '上报执行改动并做事实边界检查；越界即失败并记录证据', {
+    project: projectParam,
+    claim_id: z.string().describe('认领 ID'),
+    executor: z.string().describe('执行者标识'),
+    changed_facts: z.array(z.object(CLAIM_CHANGED_FACT_SHAPE)).describe('本次执行改变的实事集合'),
+    incomplete_reason: z.string().optional(),
+  }, log('report_claim', async ({ project, ...args }) => {
+    return jsonResult(await reportClaim(await ctx(project), args.claim_id, {
+      executor: args.executor,
+      changed_facts: args.changed_facts,
+      incomplete_reason: args.incomplete_reason,
+    }));
+  }));
+
+  server.tool('narrow_claim_boundary', '收窄认领的事实边界；放宽会被拒绝，须人确认', {
+    project: projectParam,
+    claim_id: z.string().describe('认领 ID'),
+    executor: z.string().describe('执行者标识'),
+    boundary: z.object(CLAIM_BOUNDARY_SHAPE).describe('收窄后的边界声明（必须是当前边界的子集）'),
+  }, log('narrow_claim_boundary', async ({ project, ...args }) => {
+    return jsonResult(await narrowClaimBoundary(await ctx(project), args.claim_id, {
+      executor: args.executor,
+      boundary: args.boundary,
     }));
   }));
 

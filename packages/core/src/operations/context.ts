@@ -2,6 +2,7 @@ import type { Sql } from '../storage/db.js';
 import { NodeStore, EdgeStore, EventStore } from '../storage/stores.js';
 import { GapStore } from '../storage/gap-store.js';
 import { WorkpackStore } from '../storage/workpack-store.js';
+import { ClaimStore } from '../storage/claim-store.js';
 import { ProposalStore } from '../storage/proposal-store.js';
 import { ExecutorStore } from '../storage/executor-store.js';
 import { EventEmitter } from '../events/emitter.js';
@@ -17,6 +18,7 @@ export class OperationContext {
   readonly eventStore: EventStore;
   readonly gap: GapStore;
   readonly workpacks: WorkpackStore;
+  readonly claims: ClaimStore;
   readonly proposals: ProposalStore;
   readonly executors: ExecutorStore;
   private readonly sql: Sql;
@@ -31,6 +33,7 @@ export class OperationContext {
     this.events = new EventEmitter(this.eventStore);
     this.gap = new GapStore(sql, projectId);
     this.workpacks = new WorkpackStore(sql, projectId);
+    this.claims = new ClaimStore(sql, projectId);
     this.proposals = new ProposalStore(sql, projectId);
     this.executors = new ExecutorStore(sql, projectId);
   }

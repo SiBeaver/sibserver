@@ -1,0 +1,166 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createTestDb } from '../../core/tests/helpers/test-db.js';
+import { OperationContext } from '@sibeaver/core';
+import type { BomSnapshot, BoundaryDeclaration, ClaimCreateInput, Sql } from '@sibeaver/core';
+import {
+  ClaimError, createClaim, getClaim, listClaims, narrowClaimBoundary,
+  releaseClaim, renewClaim, reportClaim, revokeClaim,
+} from '../src/claims/engine.js';
+
+const NOW = '2026-08-20T00:00:00.000Z';
+
+function bom(): BomSnapshot {
+  return {
+    commit: 'b1',
+    requirements: [
+      { key: 'dom/a', title: '需求A', rules: [{ id: 'r-aaaa', title: '规则A' }], deps: [] },
+      { key: 'dom/b', title: '需求B', rules: [{ id: 'r-bbbb', title: '规则B' }], deps: [] },
+      { key: 'dom/c', title: '需求C', rules: [{ id: 'r-cccc', title: '规则C' }], deps: [] },
+    ],
+    constraints: [],
+  };
+}
+
+function boundary(code: string[], contract: string[] = []): BoundaryDeclaration {
+  const factTypes: BoundaryDeclaration['fact_types'] = [{ type: 'code', scopes: code }];
+  if (contract.length > 0) factTypes.push({ type: 'contract', scopes: contract });
+  return { fact_types: factTypes, read_only: [], escalation: [] };
+}
+
+function claimInput(executor: string, keys: string[], declared: BoundaryDeclaration): ClaimCreateInput {
+  return {
+    executor,
+    requirement_keys: keys,
+    domain: 'build',
+    boundary: declared,
+    isolation_mode: 'worktree',
+    isolation_id: `${executor}-wt`,
+    pre_authorization: {
+      autonomous_actions: ['run tests', 'edit code'],
+      prohibited: ['push'],
+      default_assumptions: ['deps installed'],
+      must_stop_conditions: ['contract change'],
+    },
+    session_ref: { host: 'host-1', workspace: '/repo', native_id: 'sess-1' },
+  };
+}
+
+describe('责任认领（claims）', () => {
+  let ctx: OperationContext;
+  let sql: Sql;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    const t = await createTestDb();
+    ctx = new OperationContext(t.sql, 'default');
+    sql = t.sql;
+    close = t.close;
+    await ctx.gap.setBaseline(bom(), NOW);
+  });
+
+  afterEach(async () => { await close(); });
+
+  it('认领携带边界声明、预授权与会话引用登记', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+    expect(claim.status).toBe('active');
+    expect(claim.baseline_commit).toBe('b1');
+    expect(claim.requirement_keys).toEqual(['dom/a']);
+    expect(claim.boundary.fact_types).toEqual([{ type: 'code', scopes: ['src/a/'] }]);
+    expect(claim.pre_authorization?.must_stop_conditions).toEqual(['contract change']);
+    expect(claim.session_ref).toEqual({ host: 'host-1', workspace: '/repo', native_id: 'sess-1' });
+
+    const active = await listClaims(ctx);
+    expect(active.map(item => item.id)).toEqual([claim.id]);
+  });
+
+  it('需求键互斥先到先得，事实边界相交不阻止准入', async () => {
+    await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+
+    await expect(
+      createClaim(ctx, claimInput('agent-2', ['dom/a'], boundary(['src/other/']))),
+    ).rejects.toBeInstanceOf(ClaimError);
+    expect((await listClaims(ctx)).length).toBe(1);
+
+    const overlapping = await createClaim(ctx, claimInput('agent-2', ['dom/b'], boundary(['src/a/'])));
+    expect(overlapping.status).toBe('active');
+  });
+
+  it('未知需求键与跨域事实类型被拒绝', async () => {
+    await expect(
+      createClaim(ctx, claimInput('agent-1', ['dom/unknown'], boundary(['src/a/']))),
+    ).rejects.toMatchObject({ status: 400 });
+
+    await expect(
+      createClaim(ctx, {
+        ...claimInput('agent-1', ['dom/a'], boundary(['src/a/'])),
+        boundary: { fact_types: [{ type: 'host', scopes: ['host-1'] }], read_only: [], escalation: [] },
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('越界即失败：记录越界证据并关闭认领', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+    const result = await reportClaim(ctx, claim.id, {
+      executor: 'agent-1',
+      changed_facts: [{ path: 'src/a/file.ts' }, { path: 'src/b/other.ts' }],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.out_of_scope).toEqual(['src/b/other.ts']);
+
+    const stored = await getClaim(ctx, claim.id);
+    expect(stored.status).toBe('failed');
+
+    const evidence = await ctx.gap.getEvidence(`claim:${claim.id}`);
+    expect(evidence).not.toBeNull();
+    expect((evidence?.payload as { out_of_scope: string[] }).out_of_scope).toEqual(['src/b/other.ts']);
+  });
+
+  it('契约子树写入只提案，不判越界', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'], ['vibespec/requirements/'])));
+    const result = await reportClaim(ctx, claim.id, {
+      executor: 'agent-1',
+      changed_facts: [{ path: 'src/a/file.ts' }, { path: 'vibespec/requirements/dom/a.md' }],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.proposal_only).toEqual(['vibespec/requirements/dom/a.md']);
+    expect((await getClaim(ctx, claim.id)).status).toBe('active');
+  });
+
+  it('边界只能收窄：允许子范围，拒绝放宽', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+    const narrowed = await narrowClaimBoundary(ctx, claim.id, {
+      executor: 'agent-1',
+      boundary: boundary(['src/a/sub/']),
+    });
+    expect(narrowed.boundary.fact_types).toEqual([{ type: 'code', scopes: ['src/a/sub/'] }]);
+
+    await expect(narrowClaimBoundary(ctx, claim.id, {
+      executor: 'agent-1',
+      boundary: boundary(['src/']),
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('租约过期后需求键回到可领取，失效认领保留痕迹', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+    await sql`UPDATE claims SET lease_expires_at = '2000-01-01T00:00:00.000Z' WHERE project_id = 'default'`;
+
+    const again = await createClaim(ctx, claimInput('agent-2', ['dom/a'], boundary(['src/a/'])));
+    expect(again.executor).toBe('agent-2');
+    expect((await getClaim(ctx, claim.id)).status).toBe('expired');
+  });
+
+  it('续租延长有效期，撤销释放需求键并记录原因', async () => {
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+    const renewed = await renewClaim(ctx, claim.id, { executor: 'agent-1' });
+    expect(renewed.lease_expires_at >= claim.lease_expires_at).toBe(true);
+
+    const released = await releaseClaim(ctx, claim.id, { executor: 'agent-1' });
+    expect(released.status).toBe('released');
+
+    const second = await createClaim(ctx, claimInput('agent-2', ['dom/a'], boundary(['src/a/'])));
+    const revoked = await revokeClaim(ctx, second.id, { revoked_by: 'human', reason: '需求变更' });
+    expect(revoked.status).toBe('revoked');
+    expect(revoked.revoked_reason).toContain('需求变更');
+    expect((await listClaims(ctx)).length).toBe(0);
+  });
+});

@@ -248,6 +248,41 @@ CREATE INDEX IF NOT EXISTS idx_workpack_claims_active
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workpack_claims_one_active
   ON workpack_claims(project_id, workpack_id) WHERE status = 'active';
 
+-- 责任认领：边界声明随认领提交（r-bc1a）；互斥按需求键（r-wp3c）
+CREATE TABLE IF NOT EXISTS claims (
+  id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  executor TEXT NOT NULL,
+  requirement_keys TEXT[] NOT NULL DEFAULT '{}',
+  domain TEXT NOT NULL DEFAULT 'build',
+  baseline_commit TEXT NOT NULL,
+  boundary JSONB NOT NULL,
+  pre_authorization JSONB,
+  isolation_mode TEXT NOT NULL,
+  isolation_id TEXT NOT NULL,
+  session_ref JSONB,
+  status TEXT NOT NULL DEFAULT 'active',
+  lease_expires_at TEXT NOT NULL,
+  heartbeat_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  released_at TEXT,
+  revoked_reason TEXT,
+  PRIMARY KEY (project_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_claims_active
+  ON claims(project_id, status, lease_expires_at);
+
+-- 需求键互斥：活跃行上唯一（先到先得，r-ar3c）
+CREATE TABLE IF NOT EXISTS claim_keys (
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  claim_id TEXT NOT NULL,
+  requirement_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  PRIMARY KEY (project_id, claim_id, requirement_key)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_keys_one_active
+  ON claim_keys(project_id, requirement_key) WHERE status = 'active';
+
 -- 契约变更/重规划提案（运行时状态；契约提案由基线前移确认）
 CREATE TABLE IF NOT EXISTS workpack_proposals (
   id TEXT NOT NULL,

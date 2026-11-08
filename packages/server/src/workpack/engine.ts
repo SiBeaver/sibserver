@@ -52,7 +52,7 @@ function isUniqueViolation(error: unknown): boolean {
 // ============================================================
 // 工作包派生 — 差距账本 → 可执行工作包（只读）
 // 工作包是派生视图，不落库；claim/lease 是唯一运行时状态（r-ar1a）。
-// @sibom r-ea2b — 控制面只提供协议、边界契约与状态查询；调度、agent 运行时与模型路由归 harness workflow
+// 控制面只提供协议、边界契约与状态查询；调度、agent 运行时与模型路由归 harness workflow
 // ============================================================
 
 function gapIdentityOf(row: GapRowRecord): GapIdentity {
@@ -86,7 +86,7 @@ function scopeOfConstraint(constraint: BomConstraint): string | null {
   return asString(scope);
 }
 
-// @sibom r-bc2b — 事实边界由代码认领与约束 scope 显式派生；无 scope 时标记未解析
+// 事实边界由代码认领与约束 scope 显式派生；无 scope 时标记未解析
 function deriveFactBoundary(
   requirementKey: string,
   requirement: BomRequirement | undefined,
@@ -182,7 +182,7 @@ function scopeContains(outer: string, inner: string): boolean {
   return prefix !== '' && (b === prefix || b.startsWith(`${prefix}/`));
 }
 
-// @sibom r-wp2b — 身份 = 基线 + 责任差距身份集合 + 事实边界集合的确定性摘要
+// 身份 = 基线 + 责任差距身份集合 + 事实边界集合的确定性摘要
 function workpackId(
   baseline: string,
   requirementKeys: string[],
@@ -198,7 +198,7 @@ function workpackId(
   return `wp_${createHash('sha256').update(canonical).digest('hex').slice(0, 16)}`;
 }
 
-// @sibom r-wp4d — 依赖未满足进入等待；边界相交不得同组
+// 依赖未满足进入等待；边界相交不得同组
 function assignParallelGroups(workpacks: Workpack[]): void {
   const groups: Workpack[][] = [];
   const ready = workpacks
@@ -219,10 +219,9 @@ function assignParallelGroups(workpacks: Workpack[]): void {
   }
 }
 
-// @sibom r-wp1a — 工作包由差距账本确定性派生，可随差距重算重建
-// @sibom r-wp3c — 业务边界：一个工作包负责互斥的需求键集合
+// 工作包由差距账本确定性派生，可随差距重算重建
+// @sibom r-wp3c — 责任范围以需求键集合表达，同一需求键同一时刻只有一个活跃认领
 // @sibom r-wp5e — 验收判据：重算差距后责任差距消失
-// @sibom r-bc1a — 边界契约随工作包下发，机器可读
 export async function listWorkpacks(ctx: OperationContext): Promise<WorkpackList> {
   const baseline = await ctx.gap.getBaseline();
   if (!baseline) {
@@ -334,8 +333,7 @@ export interface WorkpackBoundaryResult {
 }
 
 // @sibom r-ar1a — 认领是唯一占用；同一工作包同一时刻只有一个有效认领
-// @sibom r-ar3c — 事实冲突机械裁决：先到先得，边界相交拒绝
-// @sibom r-bc3c — 物理隔离承载并行：workspace 串行，worktree 按边界相交判定
+// 物理隔离承载并行：workspace 串行，worktree 按边界相交判定
 export async function claimWorkpack(
   ctx: OperationContext,
   workpackId: string,
@@ -548,7 +546,7 @@ export async function proposeContractChange(
   return toProposalView(record);
 }
 
-// @sibom r-ar5e — 重规划只提案：服务端不应用提案，也不改已确认契约
+// 重规划只提案：服务端不应用提案，也不改已确认契约
 export async function proposeReplan(
   ctx: OperationContext,
   input: ReplanProposalInput,
@@ -580,7 +578,7 @@ export async function listProposals(
   return records.map(toProposalView);
 }
 
-// @sibom r-ar5e — 重规划提案由人显式接受；服务端只记录，不改变派生工作包
+// 重规划提案由人显式接受；服务端只记录，不改变派生工作包
 export async function confirmReplanProposal(
   ctx: OperationContext,
   proposalId: string,

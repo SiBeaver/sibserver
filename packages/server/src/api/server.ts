@@ -32,7 +32,13 @@ import {
 } from '../workpack/engine.js';
 import { listExecutors, registerExecutor } from '../executor/engine.js';
 import {
-  BomBaselineInput, ClaimInput, ConfirmProposalInput, ContractProposalInput,
+  ClaimError, createClaim, getClaim, listClaims, narrowClaimBoundary,
+  releaseClaim, renewClaim, reportClaim, revokeClaim,
+} from '../claims/engine.js';
+import {
+  BomBaselineInput, ClaimInput, ClaimCreateInput, ClaimNarrowInput, ClaimReleaseInput,
+  ClaimRenewInput, ClaimReportInput, ClaimRevokeInput, ClaimStatus,
+  ConfirmProposalInput, ContractProposalInput,
   EvidenceReportInput, ExecutorInput, ExecutorProfileInput, NarrowBoundaryInput,
   ProposalStatus, ReplanProposalInput, ReportInput, WaiverInput, type BomConstraint,
 } from '@sibeaver/core';
@@ -270,6 +276,91 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const slug = c.req.param('project');
     // 判定只有一处（r-gd6f）：恒返认知引擎统一计算的账本，无回退分支
     return json(c, await listGaps(getCtx(slug)));
+  });
+
+  // === 责任认领（claims）——边界声明随认领提交，互斥按需求键 ===
+
+  app.get('/:project/api/v1/claims', async (c) => {
+    const slug = c.req.param('project');
+    const status = c.req.query('status');
+    const parsed = status ? ClaimStatus.safeParse(status) : null;
+    if (parsed && !parsed.success) return json(c, { error: `未知认领状态：${status}` }, 400);
+    return json(c, await listClaims(getCtx(slug), parsed?.success ? parsed.data : 'active'));
+  });
+
+  app.get('/:project/api/v1/claims/:id', async (c) => {
+    const slug = c.req.param('project');
+    try {
+      return json(c, await getClaim(getCtx(slug), c.req.param('id')));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/claims', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ClaimCreateInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await createClaim(getCtx(slug), parsed.data), 201);
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/claims/:id/renew', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ClaimRenewInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await renewClaim(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/claims/:id/release', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ClaimReleaseInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await releaseClaim(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/claims/:id/revoke', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ClaimRevokeInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await revokeClaim(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/claims/:id/report', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ClaimReportInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await reportClaim(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/claims/:id/narrow', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ClaimNarrowInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await narrowClaimBoundary(getCtx(slug), c.req.param('id'), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, e instanceof ClaimError ? e.status : 400);
+    }
   });
 
   app.get('/:project/api/v1/workpacks', async (c) => {
