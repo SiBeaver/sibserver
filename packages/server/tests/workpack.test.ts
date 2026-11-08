@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../core/tests/helpers/test-db.js';
 import { OperationContext } from '@sibeaver/core';
-import type { BomSnapshot, GapRowRecord, Workpack } from '@sibeaver/core';
-import { setBaseline } from '../src/gap/engine.js';
+import type { BomConstraint, BomSnapshot, GapRowRecord, Workpack } from '@sibeaver/core';
+import { registerConstraintSet, setBaseline } from '../src/gap/engine.js';
 import {
   claimWorkpack, confirmReplanProposal, listProposals, listWorkpacks, narrowWorkpackBoundary,
   proposeContractChange, proposeReplan, releaseWorkpack, renewWorkpack, reportWorkpack, WorkpackError,
@@ -20,24 +20,27 @@ function bom(): BomSnapshot {
       { key: 'dom/d', title: '需求D', rules: [{ id: 'r-dddd', title: '规则D' }], deps: [] },
       { key: 'dom/e', title: '需求E', rules: [{ id: 'r-eeee', title: '规则E' }], deps: [] },
     ],
-    constraints: [
-      {
-        id: 'c-a', title: 'A 范围', dimension: 'security', severity: 'critical', description: '',
-        condition: { evidence_type: 'code_pattern', scope: 'src/a/', pattern: 'auth', operator: 'present' },
-        requirement_key: 'dom/a',
-      },
-      {
-        id: 'c-c', title: 'C 范围', dimension: 'quality', severity: 'medium', description: '',
-        condition: { evidence_type: 'code_pattern', scope: 'src/c/', pattern: 'test', operator: 'present' },
-        requirement_key: 'dom/c',
-      },
-      {
-        id: 'c-d', title: 'D 共享范围', dimension: 'quality', severity: 'medium', description: '',
-        condition: { evidence_type: 'code_pattern', scope: 'src/a/shared/', pattern: 'flag', operator: 'present' },
-        requirement_key: 'dom/d',
-      },
-    ],
   };
+}
+
+function constraints(): BomConstraint[] {
+  return [
+    {
+      id: 'c-a', title: 'A 范围', dimension: 'security', severity: 'critical', description: '',
+      condition: { evidence_type: 'code_pattern', scope: 'src/a/', pattern: 'auth', operator: 'present' },
+      requirement_key: 'dom/a',
+    },
+    {
+      id: 'c-c', title: 'C 范围', dimension: 'quality', severity: 'medium', description: '',
+      condition: { evidence_type: 'code_pattern', scope: 'src/c/', pattern: 'test', operator: 'present' },
+      requirement_key: 'dom/c',
+    },
+    {
+      id: 'c-d', title: 'D 共享范围', dimension: 'quality', severity: 'medium', description: '',
+      condition: { evidence_type: 'code_pattern', scope: 'src/a/shared/', pattern: 'flag', operator: 'present' },
+      requirement_key: 'dom/d',
+    },
+  ];
 }
 
 function gapRow(
@@ -56,6 +59,8 @@ function gapRow(
     source_ref: evidenceSource,
     evidence_source: evidenceSource,
     bom_commit: 'b1',
+    constraint_set_id: evidenceSource.startsWith('constraint:') ? 'cs-wp' : null,
+    constraint_set_hash: null,
     condition_fingerprint: `cf-${id}`,
     evidence_fingerprint: null,
     status: 'open',
@@ -80,6 +85,7 @@ describe('工作包派生', () => {
     ctx = new OperationContext(t.sql, 'default');
     close = t.close;
     await ctx.gap.setBaseline(bom(), NOW);
+    await registerConstraintSet(ctx, { id: 'cs-wp', items: constraints() }, NOW);
     await ctx.gap.upsertEvidence({
       source_id: 'sibom-tags',
       payload: { rules: [{ id: 'r-aaaa', file: 'src/a/file.ts' }] },
@@ -98,6 +104,17 @@ describe('工作包派生', () => {
   });
 
   afterEach(async () => { await close(); });
+
+  it('派生边界以账本行为准：gap_state 清空后工作包仍 derived 且 id 不变', async () => {
+    const before = await listWorkpacks(ctx);
+    const idBefore = find(before.workpacks, 'dom/a').id;
+    await ctx.gap.setGapState({ last_constraint_set_id: null, last_constraint_set_hash: null, updated_at: NOW });
+    const after = await listWorkpacks(ctx);
+    const a = find(after.workpacks, 'dom/a');
+    expect(a.id).toBe(idBefore);
+    expect(a.boundary.fact_boundary.status).toBe('derived');
+    expect(a.boundary.fact_boundary.sources).toContain('constraint:c-a');
+  });
 
   it('按需求键聚拢差距，派生边界契约、依赖与并行组', async () => {
     const result = await listWorkpacks(ctx);
@@ -168,6 +185,7 @@ describe('工作包认领与边界执行', () => {
     ctx = new OperationContext(t.sql, 'default');
     close = t.close;
     await ctx.gap.setBaseline(bom(), NOW);
+    await registerConstraintSet(ctx, { id: 'cs-wp', items: constraints() }, NOW);
     await ctx.gap.upsertEvidence({
       source_id: 'sibom-tags',
       payload: { rules: [{ id: 'r-aaaa', file: 'src/a/file.ts' }] },
@@ -317,6 +335,7 @@ describe('工作包提案与重规划', () => {
     ctx = new OperationContext(t.sql, 'default');
     close = t.close;
     await ctx.gap.setBaseline(bom(), NOW);
+    await registerConstraintSet(ctx, { id: 'cs-wp', items: constraints() }, NOW);
     await ctx.gap.upsertEvidence({
       source_id: 'sibom-tags',
       payload: { rules: [{ id: 'r-aaaa', file: 'src/a/file.ts' }] },

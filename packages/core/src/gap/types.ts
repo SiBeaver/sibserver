@@ -19,6 +19,8 @@ export type GapRowStatus = z.infer<typeof GapRowStatus>;
 export const BomRule = z.object({
   id: z.string(),
   title: z.string(),
+  /** 判据正文摘要（r-vb7g）：判据内容变化即使标题不变也进入探测 */
+  digest: z.string().optional(),
 });
 export type BomRule = z.infer<typeof BomRule>;
 
@@ -39,18 +41,52 @@ export type BomConstraint = z.infer<typeof BomConstraint>;
 export const BomSnapshot = z.object({
   commit: z.string(),
   requirements: z.array(BomRequirement).default([]),
-  constraints: z.array(BomConstraint).default([]),
+  /** 仅身份投影（r-vb5e）：draft 需求与规则不进入基线、不参与对账 */
+  draft_requirements: z.array(BomRequirement).default([]),
 });
 export type BomSnapshot = z.infer<typeof BomSnapshot>;
 
-// 分区上报载荷：requirements/constraints 可缺省——缺省分区沿用旧基线值；
-// 首次上报（无旧基线）时缺任一分区由引擎拒绝（400）。
+// 分区上报载荷：requirements/draft_requirements 可缺省——缺省分区沿用旧基线值；
+// 首次上报（无旧基线）时 requirements 必填。constraint_set_id 只决定 changed-key 重算
+// 引用的约束集，约束集本身从不进入基线（r-vb4d / r-vb2b）。
 export const BomBaselineInput = z.object({
   commit: z.string(),
   requirements: z.array(BomRequirement).optional(),
-  constraints: z.array(BomConstraint).optional(),
+  draft_requirements: z.array(BomRequirement).optional(),
+  constraint_set_id: z.string().optional(),
 });
 export type BomBaselineInput = z.infer<typeof BomBaselineInput>;
+
+// ── 约束集（独立版本化的对账输入，不随基线前移）───────────
+
+export const ConstraintSetInput = z.object({
+  id: z.string().min(1),
+  /** 规格字段：约束项列表（camelCase 由 API 层转换） */
+  items: z.array(BomConstraint),
+});
+export type ConstraintSetInput = z.infer<typeof ConstraintSetInput>;
+
+export interface ConstraintSetRecord {
+  set_id: string;
+  set_hash: string;
+  constraints: BomConstraint[];
+  created_at: string;
+}
+
+export interface ConstraintSetView {
+  id: string;
+  hash: string;
+  item_count: number;
+  created_at: string;
+  items: BomConstraint[];
+}
+
+/** 对账操作最近一次引用的约束集（账本视图字段；不属于基线） */
+export interface GapStateRecord {
+  last_constraint_set_id: string | null;
+  last_constraint_set_hash: string | null;
+  updated_at: string | null;
+}
 
 // ── 账本行 ──────────────────────────────────────────────────
 
@@ -65,6 +101,10 @@ export interface GapRowRecord {
   /** 身份三元组之证据源——constraint:{id} / sibom-tags:{ruleId} / @bom:{key} / @sibom:{ruleId} / node:{id} / witem:{id} */
   evidence_source: string;
   bom_commit: string;
+  /** 判定该行所用的约束集版本；无约束判定时为 null */
+  constraint_set_id: string | null;
+  /** 判定该行所用的约束集哈希；无约束判定时为 null */
+  constraint_set_hash: string | null;
   condition_fingerprint: string;
   evidence_fingerprint: string | null;
   status: GapRowStatus;
@@ -88,11 +128,11 @@ export const EvidenceItemInput = z.object({
 });
 export type EvidenceItemInput = z.infer<typeof EvidenceItemInput>;
 
-/** 证据上报载荷（r-gl5e）：constraints 分区先并入基线再重算 */
+/** 证据上报载荷（r-gl5e / r-vb2b）：约束由已注册的约束集解析，上报不推进基线 */
 export const EvidenceReportInput = z.object({
   items: z.array(EvidenceItemInput),
-  constraints: z.array(BomConstraint).optional(),
-  commit: z.string().optional(),
+  /** 已注册的约束集版本；证据含 constraint:{id} 项时必填 */
+  constraint_set_id: z.string().optional(),
 });
 export type EvidenceReportInput = z.infer<typeof EvidenceReportInput>;
 

@@ -9,6 +9,9 @@ import type {
   BomSnapshot,
   BomConstraint,
   BomRequirement,
+  ConstraintSetInput,
+  ConstraintSetRecord,
+  ConstraintSetView,
   EvidenceReportInput,
   EvidenceScene,
   GapRowRecord,
@@ -26,7 +29,7 @@ import type {
 const GLOBAL_KEY = '(global)';
 
 export function fingerprint(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  return createHash('sha256').update(JSON.stringify(value) ?? 'null').digest('hex');
 }
 
 /** 键序无关的稳定序列化——jsonb 往返会重排对象键序，跨 DB 比较相等须按值不按文本 */
@@ -52,7 +55,19 @@ interface DesiredGap {
   evidence_source: string;
   condition_fingerprint: string;
   evidence_fingerprint: string | null;
+  /** 约束判定行携带所用约束集；其余行为 null */
+  constraint_set_id: string | null;
+  constraint_set_hash: string | null;
 }
+
+/** 已解析的约束集——对账输入的一部分，独立于基线（r-vb4d） */
+export interface ConstraintInput {
+  set_id: string | null;
+  set_hash: string | null;
+  constraints: BomConstraint[];
+}
+
+const EMPTY_CONSTRAINTS: ConstraintInput = { set_id: null, set_hash: null, constraints: [] };
 
 function identityOf(g: Pick<DesiredGap, 'requirement_key' | 'kind' | 'evidence_source'>): string {
   return `${g.requirement_key}\u0000${g.kind}\u0000${g.evidence_source}`;
@@ -72,13 +87,22 @@ export interface ReconcileScope {
 
 const FULL_SCOPE: ReconcileScope = { ruleKeys: null, constraintKeys: null };
 
+// @sibom r-gd1a — 差距是期望（BOM@基线 + 约束集）与现实（证据集）的事实不一致
+// @sibom r-gd3c — 差距三型：violation / absence / staleness 均由对照计算产出
 async function computeDesiredGaps(
   ctx: OperationContext,
   bom: BomSnapshot,
+  constraints: ConstraintInput,
   scope: ReconcileScope,
 ): Promise<DesiredGap[]> {
   const gaps: DesiredGap[] = [];
-  const bomKeys = new Set(bom.requirements.map(r => r.key));
+  // draft 需求保留身份投影（r-vb5e）：键参与 staleness 身份对照，但规则不参与对账
+  const bomKeys = new Set([
+    ...bom.requirements.map(r => r.key),
+    ...bom.draft_requirements.map(r => r.key),
+  ]);
+  // 契约要求键（非 draft）：约束判定只在基线契约内进行（r-vb5e）
+  const activeKeys = new Set(bom.requirements.map(r => r.key));
   const ruleInScope = (key: string) => scope.ruleKeys === null || scope.ruleKeys.has(key);
   const constraintInScope = (key: string) => scope.constraintKeys === null || scope.constraintKeys.has(key);
 
@@ -99,22 +123,25 @@ async function computeDesiredGaps(
         severity: 'medium',
         source_ref: rule.id,
         evidence_source: `sibom-tags:${rule.id}`,
-        condition_fingerprint: fingerprint({ t: 'rule', key: req.key, rule: rule.id, title: rule.title }),
+        condition_fingerprint: fingerprint({ t: 'rule', key: req.key, rule: rule.id, title: rule.title, digest: rule.digest ?? null }),
         evidence_fingerprint: sibomEv?.fingerprint ?? null,
+        constraint_set_id: null,
+        constraint_set_hash: null,
       });
     }
   }
 
-  // Step 2: 约束 vs 证据 → 违约 / 缺失
-  for (const constraint of bom.constraints) {
+  // Step 2: 约束 vs 证据 → 违约 / 缺失（约束来自独立版本化约束集，不进入基线 r-vb4d）
+  for (const constraint of constraints.constraints) {
     const key = constraintKey(constraint);
     if (!constraintInScope(key)) continue;
-    if (key !== GLOBAL_KEY && !bomKeys.has(key)) continue; // 键失配 → Step 3 staleness
+    if (key !== GLOBAL_KEY && !activeKeys.has(key)) continue; // 键失配/ draft → 不参与约束判定
     const ev = await ctx.gap.getEvidence(`constraint:${constraint.id}`);
     const evidence = buildEvidenceInput(constraint, ev?.payload);
     const result = await evaluateConstraint(constraint, evidence, ctx);
     if (result.satisfied === true) continue;
-    const conditionFp = fingerprint({ t: 'constraint', id: constraint.id, condition: constraint.condition });
+    // 判定依据含约束集哈希（spec · GapRow.conditionFingerprint）：换约束集即重新提醒
+    const conditionFp = fingerprint({ t: 'constraint', id: constraint.id, condition: constraint.condition, set: constraints.set_hash });
     if (result.satisfied === null) {
       gaps.push({
         requirement_key: key,
@@ -126,6 +153,8 @@ async function computeDesiredGaps(
         evidence_source: `constraint:${constraint.id}`,
         condition_fingerprint: conditionFp,
         evidence_fingerprint: ev?.fingerprint ?? null,
+        constraint_set_id: constraints.set_id,
+        constraint_set_hash: constraints.set_hash,
       });
     } else {
       gaps.push({
@@ -138,12 +167,14 @@ async function computeDesiredGaps(
         evidence_source: `constraint:${constraint.id}`,
         condition_fingerprint: conditionFp,
         evidence_fingerprint: ev?.fingerprint ?? fingerprint(result.actual_value),
+        constraint_set_id: constraints.set_id,
+        constraint_set_hash: constraints.set_hash,
       });
     }
   }
 
   // Step 3: 需求过时检测 → staleness（结构性对照，始终全量：廉价）
-  for (const constraint of bom.constraints) {
+  for (const constraint of constraints.constraints) {
     const key = constraint.requirement_key;
     if (key && !bomKeys.has(key)) {
       gaps.push({
@@ -154,8 +185,10 @@ async function computeDesiredGaps(
         severity: constraint.severity,
         source_ref: constraint.id,
         evidence_source: `constraint:${constraint.id}`,
-        condition_fingerprint: fingerprint({ t: 'stale-constraint', id: constraint.id, key }),
+        condition_fingerprint: fingerprint({ t: 'stale-constraint', id: constraint.id, key, set: constraints.set_hash }),
         evidence_fingerprint: null,
+        constraint_set_id: constraints.set_id,
+        constraint_set_hash: constraints.set_hash,
       });
     }
   }
@@ -175,6 +208,8 @@ async function computeDesiredGaps(
       evidence_source: `node:${node.id}`,
       condition_fingerprint: fingerprint({ t: 'stale-node', id: node.id, key }),
       evidence_fingerprint: null,
+      constraint_set_id: null,
+      constraint_set_hash: null,
     });
   }
 
@@ -199,13 +234,19 @@ async function computeDesiredGaps(
         evidence_source: `@bom:${key}`,
         condition_fingerprint: fingerprint({ t: 'stale-tag', key }),
         evidence_fingerprint: fingerprint(files),
+        constraint_set_id: null,
+        constraint_set_hash: null,
       });
     }
   }
 
   if (sibomEv) {
     const rules = ((sibomEv.payload as { rules?: Array<{ id: string; file: string }> }).rules ?? []);
-    const knownRules = new Set(bom.requirements.flatMap(r => (r.rules ?? []).map(x => x.id)));
+    // draft 需求的规则保留身份（r-vb5e）：代码认领 draft 规则不算悬空
+    const knownRules = new Set([
+      ...bom.requirements.flatMap(r => (r.rules ?? []).map(x => x.id)),
+      ...bom.draft_requirements.flatMap(r => (r.rules ?? []).map(x => x.id)),
+    ]);
     const staleByRule = new Map<string, string[]>();
     for (const rule of rules) {
       if (knownRules.has(rule.id)) continue;
@@ -224,6 +265,8 @@ async function computeDesiredGaps(
         evidence_source: `@sibom:${ruleId}`,
         condition_fingerprint: fingerprint({ t: 'stale-sibom', rule: ruleId }),
         evidence_fingerprint: fingerprint(files),
+        constraint_set_id: null,
+        constraint_set_hash: null,
       });
     }
   }
@@ -246,6 +289,8 @@ async function computeDesiredGaps(
         evidence_source: `witem:${witem.id}`,
         condition_fingerprint: fingerprint({ t: 'stale-witem', id: witem.id, key }),
         evidence_fingerprint: null,
+        constraint_set_id: null,
+        constraint_set_hash: null,
       });
     }
   }
@@ -265,42 +310,135 @@ function buildEvidenceInput(constraint: BomConstraint, payload: unknown): Eviden
   return {};
 }
 
+// ── 约束集（独立版本化，永不进入基线 r-vb4d / r-vb2b）────────
+
+/** 约束集内容哈希——用于条件指纹与行级版本留痕 */
+export function constraintSetHash(constraints: BomConstraint[]): string {
+  return fingerprint(stableStringify(constraints));
+}
+
+/** 注册约束集：同 id 同内容幂等，同 id 不同内容拒绝（不可变） */
+export async function registerConstraintSet(
+  ctx: OperationContext,
+  input: ConstraintSetInput,
+  now: string = new Date().toISOString(),
+): Promise<ConstraintSetView> {
+  const hash = constraintSetHash(input.items);
+  const existing = await ctx.gap.getConstraintSet(input.id);
+  if (existing) {
+    if (existing.set_hash !== hash) {
+      throw new Error(`约束集「${input.id}」已注册且内容不同——约束集不可变，请换新版本号`);
+    }
+    return toConstraintSetView(existing);
+  }
+  const record: ConstraintSetRecord = {
+    set_id: input.id,
+    set_hash: hash,
+    constraints: input.items,
+    created_at: now,
+  };
+  await ctx.gap.insertConstraintSet(record);
+  // 并发注册同 id 异内容时 ON CONFLICT DO NOTHING：回读实际行，确保返回内容与库一致
+  const stored = await ctx.gap.getConstraintSet(input.id);
+  if (!stored || stored.set_hash !== hash) {
+    throw new Error(`约束集「${input.id}」并发注册冲突且内容不同——约束集不可变，请换新版本号`);
+  }
+  return toConstraintSetView(stored);
+}
+
+function toConstraintSetView(record: ConstraintSetRecord): ConstraintSetView {
+  return {
+    id: record.set_id,
+    hash: record.set_hash,
+    item_count: record.constraints.length,
+    created_at: record.created_at,
+    items: record.constraints,
+  };
+}
+
+export async function listConstraintSets(ctx: OperationContext): Promise<ConstraintSetView[]> {
+  const sets = await ctx.gap.listConstraintSets();
+  return sets.map(toConstraintSetView);
+}
+
+// @sibom r-el5e — 约束由调用方显式传入版本：缺省为空集，不复用上一次的值
+async function resolveConstraintSet(ctx: OperationContext, setId: string | undefined): Promise<ConstraintInput> {
+  if (!setId) return EMPTY_CONSTRAINTS; // 缺省 = 空集（不复用旧集）
+  const record = await ctx.gap.getConstraintSet(setId);
+  if (!record) throw new Error(`约束集不存在：${setId}`);
+  return { set_id: record.set_id, set_hash: record.set_hash, constraints: record.constraints };
+}
+
 // ── 对账（增量 diff 落账）───────────────────────────────────
 
 export interface ReconcileResult {
   bom_commit: string;
+  constraint_set_id: string | null;
+  constraint_set_hash: string | null;
+  changed_keys: string[];
+  superseded: number;
   inserted: number;
   refreshed: number;
   resolved: number;
   unchanged: number;
 }
 
+// @sibom r-gd2b — 差距不由人创建/关闭：唯一写路径是本次对照重算
+// @sibom r-gd4d — 确定性探测：输入显式（基线 + 显式约束集版本，缺省空集不复用），固定三步顺序
+// @sibom r-gd5e — 对账基准 = 当前确认版本（基线指针）
+// @sibom r-gd6f — 判定只有一处：账本行只在此派生写入，视图只读
+// @sibom r-el4d — 对账的确定性输入：基线 + 约束集 @ 版本 + 证据集，不扫工作区
+// @sibom r-vb6f — 账本由基线快照、约束集与证据集重算派生：同一输入必得同一账本，清空后可完全重建
 export async function reconcile(
   ctx: OperationContext,
   scope: ReconcileScope = FULL_SCOPE,
   now: string = new Date().toISOString(),
+  constraintSetId?: string,
 ): Promise<ReconcileResult> {
   const baseline = await ctx.gap.getBaseline();
   if (!baseline) throw new Error('未设基准——请先上报 BOM 快照');
-
-  const desired = await computeDesiredGaps(ctx, baseline.bom, scope);
+  const constraints = await resolveConstraintSet(ctx, constraintSetId);
   const openRows = await ctx.gap.getOpenRows();
+
+  // 约束集换版：行上记录的集合 ≠ 本次集合的约束行全部重判（删除的约束 → 行 resolve；
+  // severity/指纹变化 → 行 refresh；避免增量证据被 skipped 时旧判定永久滞留）
+  let effectiveScope = scope;
+  if (constraints.set_id !== null && scope.constraintKeys !== null) {
+    const staleKeys = new Set(
+      openRows
+        .filter(r => r.evidence_source.startsWith('constraint:') && r.constraint_set_id !== constraints.set_id)
+        .map(r => r.requirement_key),
+    );
+    if (staleKeys.size > 0) {
+      effectiveScope = {
+        ...scope,
+        constraintKeys: new Set([...scope.constraintKeys, ...staleKeys]),
+      };
+    }
+  }
+
+  const desired = await computeDesiredGaps(ctx, baseline.bom, constraints, effectiveScope);
   const scopedRows = openRows.filter(r => {
     if (r.kind === 'staleness') return true;
     if (r.evidence_source.startsWith('sibom-tags:')) {
-      return scope.ruleKeys === null || scope.ruleKeys.has(r.requirement_key);
+      return effectiveScope.ruleKeys === null || effectiveScope.ruleKeys.has(r.requirement_key);
     }
     if (r.evidence_source.startsWith('constraint:')) {
-      return scope.constraintKeys === null || scope.constraintKeys.has(r.requirement_key);
+      return effectiveScope.constraintKeys === null || effectiveScope.constraintKeys.has(r.requirement_key);
     }
-    return scope.ruleKeys === null && scope.constraintKeys === null;
+    return effectiveScope.ruleKeys === null && effectiveScope.constraintKeys === null;
   });
 
   const desiredByIdentity = new Map(desired.map(g => [identityOf(g), g]));
   const existingByIdentity = new Map(scopedRows.map(r => [identityOf(r), r]));
 
   const result: ReconcileResult = {
-    bom_commit: baseline.bom_commit, inserted: 0, refreshed: 0, resolved: 0, unchanged: 0,
+    bom_commit: baseline.bom_commit,
+    constraint_set_id: constraints.set_id,
+    constraint_set_hash: constraints.set_hash,
+    changed_keys: [],
+    superseded: 0,
+    inserted: 0, refreshed: 0, resolved: 0, unchanged: 0,
   };
 
   for (const [identity, gap] of desiredByIdentity) {
@@ -316,8 +454,15 @@ export async function reconcile(
         superseded_at: null,
       });
       result.inserted++;
-    } else if (existing.evidence_fingerprint !== gap.evidence_fingerprint || existing.detail !== gap.detail) {
-      await ctx.gap.refreshRow(existing.id, gap.detail, gap.evidence_fingerprint, now);
+    } else if (
+      existing.evidence_fingerprint !== gap.evidence_fingerprint
+      || existing.detail !== gap.detail
+      || existing.condition_fingerprint !== gap.condition_fingerprint
+    ) {
+      await ctx.gap.refreshRow(
+        existing.id, gap.detail, gap.evidence_fingerprint, now,
+        gap.condition_fingerprint, gap.constraint_set_id, gap.constraint_set_hash,
+      );
       result.refreshed++;
     } else {
       result.unchanged++;
@@ -331,6 +476,13 @@ export async function reconcile(
     }
   }
 
+  // 账本视图级版本：按规格记录最后一次对账所用版本（含 null；行列版本始终以行为准）
+  await ctx.gap.setGapState({
+    last_constraint_set_id: constraints.set_id,
+    last_constraint_set_hash: constraints.set_hash,
+    updated_at: now,
+  });
+
   return result;
 }
 
@@ -341,23 +493,38 @@ export interface BaselineResult extends ReconcileResult {
   superseded: number;
 }
 
+function assertPartitionsDisjoint(bom: BomSnapshot): void {
+  const active = new Set(bom.requirements.map(r => r.key));
+  const overlap = bom.draft_requirements.map(r => r.key).filter(key => active.has(key));
+  if (overlap.length > 0) {
+    throw new Error(`需求键同时出现在 requirements 与 draft_requirements：${[...new Set(overlap)].join(', ')}`);
+  }
+}
+
+// @sibom r-vb2b — 基线只由人审确认（commit）的契约变更推进；证据上报与约束集变更不经此路径
+// @sibom r-vb7g — 基线 commit 前移时按键 diff，契约版本变更（含判据摘要变化）进入探测并产出增量差距
 export async function setBaseline(
   ctx: OperationContext,
   input: BomBaselineInput,
   now: string = new Date().toISOString(),
 ): Promise<BaselineResult> {
   const old = await ctx.gap.getBaseline();
+  // 约束集只是 changed-key 重算的输入，从不写入基线（r-vb4d）
+  const scopeSetId = input.constraint_set_id;
 
   if (!old) {
-    // 首次上报：缺省分区视为空分区——sync（requirements）与采集器（constraints）任一先到均可建基线，
-    // 另一分区随后续同 commit 分区合并补齐（r-vb4d）
+    // 首次上报：requirements 必填（spec · BomBaselineInput）；基线只含 BOM 契约
+    if (input.requirements === undefined) {
+      throw new Error('首次上报基线必须包含 requirements 分区');
+    }
     const bom: BomSnapshot = {
       commit: input.commit,
-      requirements: input.requirements ?? [],
-      constraints: input.constraints ?? [],
+      requirements: input.requirements,
+      draft_requirements: input.draft_requirements ?? [],
     };
+    assertPartitionsDisjoint(bom);
     await ctx.gap.setBaseline(bom, now);
-    const r = await reconcile(ctx, FULL_SCOPE, now);
+    const r = await reconcile(ctx, FULL_SCOPE, now, scopeSetId);
     return { ...r, changed_keys: bom.requirements.map(x => x.key), superseded: 0 };
   }
 
@@ -365,8 +532,9 @@ export async function setBaseline(
   const bom: BomSnapshot = {
     commit: input.commit,
     requirements: input.requirements ?? old.bom.requirements,
-    constraints: input.constraints ?? old.bom.constraints,
+    draft_requirements: input.draft_requirements ?? old.bom.draft_requirements,
   };
+  assertPartitionsDisjoint(bom);
   await ctx.gap.setBaseline(bom, now);
 
   const changedKeys = diffBomKeys(old.bom, bom);
@@ -377,10 +545,11 @@ export async function setBaseline(
   const openBefore = await ctx.gap.getOpenRows();
   const superseded = openBefore.filter(r => changedKeys.has(r.requirement_key)).length;
   await ctx.gap.supersedeRowsByKeys([...changedKeys], now);
-  const r = await reconcile(ctx, { ruleKeys: changedKeys, constraintKeys: changedKeys }, now);
+  const r = await reconcile(ctx, { ruleKeys: changedKeys, constraintKeys: changedKeys }, now, scopeSetId);
   return { ...r, changed_keys: [...changedKeys].sort(), superseded };
 }
 
+/** 契约变更键集合：需求新增/删除/修改（含规则判据摘要变化）；draft 进出即键变化 */
 function diffBomKeys(oldBom: BomSnapshot, newBom: BomSnapshot): Set<string> {
   const changed = new Set<string>();
   const oldReqs = new Map(oldBom.requirements.map(r => [r.key, r]));
@@ -392,22 +561,6 @@ function diffBomKeys(oldBom: BomSnapshot, newBom: BomSnapshot): Set<string> {
   for (const key of oldReqs.keys()) {
     if (!newReqs.has(key)) changed.add(key);
   }
-  const byKey = (list: BomConstraint[]) => {
-    const m = new Map<string, string>();
-    for (const c of list) {
-      const k = constraintKey(c);
-      m.set(k, (m.get(k) ?? '') + stableStringify(c));
-    }
-    return m;
-  };
-  const oldCons = byKey(oldBom.constraints);
-  const newCons = byKey(newBom.constraints);
-  for (const [key, sig] of newCons) {
-    if (oldCons.get(key) !== sig) changed.add(key);
-  }
-  for (const key of oldCons.keys()) {
-    if (!newCons.has(key)) changed.add(key);
-  }
   return changed;
 }
 
@@ -418,6 +571,9 @@ export interface EvidenceReportResult extends ReconcileResult {
   skipped: number;
 }
 
+// @sibom r-el1a — 证据按基线版本组织：记录观测时的 baseline_commit，append-only 留痕可追溯
+// @sibom r-el2b — 证据以 source_id（constraint:{id} / sibom-tags / bom-tags）为锚定判据单位入账
+// @sibom r-vb2b — 证据上报只写证据并重算，绝不推进基线；约束从已注册约束集解析
 export async function reportEvidence(
   ctx: OperationContext,
   input: EvidenceReportInput,
@@ -427,13 +583,19 @@ export async function reportEvidence(
   if (!baseline) throw new Error('未设基准——请先上报 BOM 快照');
 
   const items = input.items;
+  const hasConstraintItem = items.some(item => item.source_id.startsWith('constraint:'));
+  if (hasConstraintItem && !input.constraint_set_id) {
+    throw new Error('约束证据需要 constraint_set_id：请先注册约束集再上报');
+  }
+  const constraints = await resolveConstraintSet(ctx, input.constraint_set_id);
+
   const affectedKeys = new Set<string>();
   let sibomChanged = false;
   let accepted = 0;
   let skipped = 0;
 
   const constraintByIdKey = new Map(
-    baseline.bom.constraints.map(c => [c.id, constraintKey(c)]),
+    constraints.constraints.map(c => [c.id, constraintKey(c)]),
   );
 
   for (const item of items) {
@@ -463,6 +625,10 @@ export async function reportEvidence(
   if (accepted === 0) {
     return {
       bom_commit: baseline.bom_commit,
+      constraint_set_id: constraints.set_id,
+      constraint_set_hash: constraints.set_hash,
+      changed_keys: [],
+      superseded: 0,
       inserted: 0, refreshed: 0, resolved: 0, unchanged: 0,
       accepted, skipped,
     };
@@ -472,7 +638,7 @@ export async function reportEvidence(
     ruleKeys: sibomChanged ? null : new Set<string>(),
     constraintKeys: affectedKeys.size > 0 ? affectedKeys : new Set<string>(),
   };
-  const r = await reconcile(ctx, scope, now);
+  const r = await reconcile(ctx, scope, now, input.constraint_set_id);
   return { ...r, accepted, skipped };
 }
 
@@ -480,10 +646,13 @@ export async function reportEvidence(
 
 export async function listGaps(ctx: OperationContext): Promise<{
   bom_commit: string | null;
+  constraint_set_id: string | null;
+  constraint_set_hash: string | null;
   gaps: GapView[];
   summary: { total: number; violation: number; absence: number; staleness: number; waived: number };
 }> {
   const baseline = await ctx.gap.getBaseline();
+  const state = await ctx.gap.getGapState();
   const rows = baseline ? await ctx.gap.getOpenRows() : [];
   const waivers = await ctx.gap.getWaivers();
   const now = new Date().toISOString();
@@ -515,6 +684,8 @@ export async function listGaps(ctx: OperationContext): Promise<{
 
   return {
     bom_commit: baseline?.bom_commit ?? null,
+    constraint_set_id: state?.last_constraint_set_id ?? null,
+    constraint_set_hash: state?.last_constraint_set_hash ?? null,
     gaps,
     summary: {
       total: gaps.length,
@@ -535,6 +706,8 @@ function evidenceSourceIdOf(row: GapRowRecord): string | null {
   return null;
 }
 
+// @sibom r-gd7g — 豁免键 = (条件指纹, 证据源)：判定依据或证据源变化即重新提醒，豁免不删除差距
+// @sibom r-gd8h — 处置入口只有两个：豁免签名（仅静默）与契约变更提案；无手动开闭差距入口
 /** 豁免签约（r-gd7g）：按 condition_fingerprint 反查 open 行，对每行存 (条件指纹+证据源) 哈希键的豁免。返回命中行数。 */
 export async function signWaiversByCondition(
   ctx: OperationContext,
@@ -570,6 +743,11 @@ export async function buildEvidenceScene(
   };
   const baseline = await ctx.gap.getBaseline();
   const evidence = await ctx.gap.getAllEvidence();
+  // 对照视图取约束定义：以当前注册版本（最近注册的约束集）为源，不依赖 gap_state
+  const setRecords = await ctx.gap.listConstraintSets();
+  const currentSet = setRecords.at(-1);
+  const constraintById = new Map<string, BomConstraint>();
+  for (const constraint of currentSet?.constraints ?? []) constraintById.set(constraint.id, constraint);
 
   for (const ev of evidence) {
     if (ev.source_id === 'bom-tags') {
@@ -582,7 +760,7 @@ export async function buildEvidenceScene(
     }
     const constraintMatch = ev.source_id.match(/^constraint:(.+)$/);
     if (constraintMatch && baseline) {
-      const constraint = baseline.bom.constraints.find(c => c.id === constraintMatch[1]);
+      const constraint = constraintById.get(constraintMatch[1]);
       if (!constraint || constraintKey(constraint) !== requirementKey) continue;
       const evidenceInput = buildEvidenceInput(constraint, ev.payload);
       const result = await evaluateConstraint(constraint, evidenceInput, ctx);

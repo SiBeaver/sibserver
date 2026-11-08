@@ -131,12 +131,30 @@ BEGIN
 END $$;
 CREATE INDEX IF NOT EXISTS idx_nodes_fts ON nodes USING GIN(search_vector);
 
--- gap ledger: 派生账（基准 + 差距行 + 证据 + 豁免），可由 (BOM@commit, 证据集) 完全重建
+-- gap ledger: 派生账（基准 + 约束集 + 差距行 + 证据 + 豁免），可由 (BOM@commit, 约束集@版本, 证据集) 完全重建
 CREATE TABLE IF NOT EXISTS gap_baseline (
   project_id TEXT PRIMARY KEY REFERENCES projects(slug),
   bom_commit TEXT NOT NULL,
   bom JSONB NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+-- 约束集：独立版本化的对账输入，永不进入基线、不随基线前移（r-vb4d / r-vb2b）
+CREATE TABLE IF NOT EXISTS gap_constraint_sets (
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  set_id TEXT NOT NULL,
+  set_hash TEXT NOT NULL,
+  constraints JSONB NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, set_id)
+);
+
+-- 最近一次对账引用的约束集（仅账本视图元数据，不属于基线）
+CREATE TABLE IF NOT EXISTS gap_state (
+  project_id TEXT PRIMARY KEY REFERENCES projects(slug),
+  last_constraint_set_id TEXT,
+  last_constraint_set_hash TEXT,
+  updated_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS gap_rows (
@@ -193,6 +211,9 @@ BEGIN
   CREATE UNIQUE INDEX IF NOT EXISTS idx_gap_rows_open_identity
     ON gap_rows(project_id, requirement_key, kind, evidence_source) WHERE status = 'open';
 END $$;
+
+ALTER TABLE gap_rows ADD COLUMN IF NOT EXISTS constraint_set_id TEXT;
+ALTER TABLE gap_rows ADD COLUMN IF NOT EXISTS constraint_set_hash TEXT;
 
 CREATE TABLE IF NOT EXISTS gap_evidence (
   project_id TEXT NOT NULL REFERENCES projects(slug),

@@ -19,13 +19,13 @@ import {
   getRoadmap, witemProgress, decisionTrail, knowledgeMap,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   batchOperations,
-  BomBaselineInput, EvidenceReportInput, WaiverInput,
+  BomBaselineInput, ConstraintSetInput, EvidenceReportInput, WaiverInput,
   type OperationContext,
 } from '../index.js';
 import type { ProjectManager } from '../projects/index.js';
-import { snakeToCamel } from '../api/transforms.js';
+import { camelToSnake, snakeToCamel } from '../api/transforms.js';
 import {
-  buildEvidenceScene, listGaps, reconcile, reportEvidence, setBaseline, signWaiversByCondition,
+  buildEvidenceScene, listConstraintSets, listGaps, reconcile, registerConstraintSet, reportEvidence, setBaseline, signWaiversByCondition,
 } from '../gap/engine.js';
 import {
   claimWorkpack, confirmReplanProposal, listProposals, listWorkpacks,
@@ -267,10 +267,20 @@ const BASELINE_SHAPE = {
     rules: z.array(z.object({
       id: z.string().describe('规则 ID（r-xxxx）'),
       title: z.string().describe('规则标题'),
+      digest: z.string().optional().describe('判据正文摘要（判据变化进入探测）'),
     })).optional().describe('需求下的业务规则'),
     deps: z.array(z.string()).optional().describe('需求依赖（跨域规范化键）'),
-  })).optional().describe('需求分区；缺省沿用旧基线'),
-  constraints: z.array(z.record(z.unknown())).optional().describe('约束分区；缺省沿用旧基线'),
+  })).optional().describe('需求分区（非 draft）；缺省沿用旧基线'),
+  draft_requirements: z.array(z.object({
+    key: z.string().describe('draft 需求键'),
+    title: z.string().describe('draft 需求标题'),
+    rules: z.array(z.object({
+      id: z.string(),
+      title: z.string(),
+      digest: z.string().optional(),
+    })).optional().describe('draft 需求规则（仅身份投影，不参与对账）'),
+  })).optional().describe('draft 身份投影分区；缺省沿用旧基线'),
+  constraint_set_id: z.string().optional().describe('changed-key 重算引用的约束集版本；缺省=空集'),
 };
 
 const EVIDENCE_REPORT_SHAPE = {
@@ -280,8 +290,12 @@ const EVIDENCE_REPORT_SHAPE = {
     reported_at: z.string().optional().describe('上报时间（ISO），缺省取服务器当前时间'),
     baseline_commit: z.string().optional().describe('观测对照的基线 commit，缺省取当前基线'),
   })).describe('证据项列表'),
-  constraints: z.array(z.record(z.unknown())).optional().describe('约束分区（先并入基线再重算）'),
-  commit: z.string().optional().describe('BOM commit（与 constraints 分区同报时必填语义）'),
+  constraint_set_id: z.string().optional().describe('已注册约束集版本；含 constraint:{id} 项时必填'),
+};
+
+const CONSTRAINT_SET_SHAPE = {
+  id: z.string().describe('调用方提供的版本号（注册后不可变）'),
+  items: z.array(z.record(z.unknown())).describe('约束项列表'),
 };
 
 const WAIVER_SHAPE = {
@@ -320,14 +334,21 @@ const CLAIM_CHANGED_FACT_SHAPE = {
 };
 
 function parseBaseline(input: unknown) {
-  const parsed = BomBaselineInput.safeParse(input);
+  const parsed = BomBaselineInput.safeParse(camelToSnake(input as Record<string, unknown>));
   if (!parsed.success) throw new Error(`基线参数无效：${parsed.error.message}`);
   return parsed.data;
 }
 
 function parseEvidenceReport(input: unknown) {
-  const parsed = EvidenceReportInput.safeParse(input);
+  const parsed = EvidenceReportInput.safeParse(camelToSnake(input as Record<string, unknown>));
   if (!parsed.success) throw new Error(`证据参数无效：${parsed.error.message}`);
+  return parsed.data;
+}
+
+/** MCP 入参可能是 camelCase（规格形态），先规范化再走与 HTTP 同一份 zod 校验 */
+function parseConstraintSet(input: unknown) {
+  const parsed = ConstraintSetInput.safeParse(camelToSnake(input as Record<string, unknown>));
+  if (!parsed.success) throw new Error(`约束集参数无效：${parsed.error.message}`);
   return parsed.data;
 }
 
@@ -528,7 +549,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(baseline ?? { bom_commit: null, bom: null, updated_at: null });
   }));
 
-  server.tool('set_gap_baseline', '上报 BOM 快照作为 GAP 基线（requirements/constraints 可分区分批上报）并重算差距', BASELINE_SHAPE, log('set_gap_baseline', async (args) => {
+  server.tool('set_gap_baseline', '上报 BOM 快照作为 GAP 基线（requirements / draft_requirements 可分区分批上报）并重算差距', BASELINE_SHAPE, log('set_gap_baseline', async (args) => {
     return jsonResult(await setBaseline(getCtx(), parseBaseline(args)));
   }));
 
@@ -555,9 +576,18 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult({ ok: true, waived: count });
   }));
 
-  server.tool('reconcile_gap', '按当前基线 + 证据全量重算差距账本', {
-  }, log('reconcile_gap', async () => {
-    return jsonResult(await reconcile(getCtx()));
+  server.tool('reconcile_gap', '按基线 + 显式约束集 + 证据重算差距账本（缺省空集，不复用上次版本）', {
+    constraint_set_id: z.string().optional().describe('约束集版本；缺省为空集（r-gd4d：不复用上一次的值）'),
+  }, log('reconcile_gap', async ({ constraint_set_id }) => {
+    return jsonResult(await reconcile(getCtx(), undefined, undefined, constraint_set_id));
+  }));
+
+  server.tool('register_constraint_set', '注册版本化约束集（不可变；同 id 异内容拒绝）', CONSTRAINT_SET_SHAPE, log('register_constraint_set', async (args) => {
+    return jsonResult(await registerConstraintSet(getCtx(), parseConstraintSet(args)));
+  }));
+
+  server.tool('list_constraint_sets', '列出已注册的约束集版本（只读）', {}, log('list_constraint_sets', async () => {
+    return jsonResult(await listConstraintSets(getCtx()));
   }));
 
   server.tool('list_workpacks', '派生工作包：按需求键聚拢开放差距，输出边界契约、依赖、并行组与验收判据（只读）', {
@@ -1100,7 +1130,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(baseline ?? { bom_commit: null, bom: null, updated_at: null });
   }));
 
-  server.tool('set_gap_baseline', '上报 BOM 快照作为 GAP 基线（requirements/constraints 可分区分批上报）并重算差距', {
+  server.tool('set_gap_baseline', '上报 BOM 快照作为 GAP 基线（requirements / draft_requirements 可分区分批上报）并重算差距', {
     project: projectParam,
     ...BASELINE_SHAPE,
   }, log('set_gap_baseline', async ({ project, ...args }) => {
@@ -1138,10 +1168,24 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult({ ok: true, waived: count });
   }));
 
-  server.tool('reconcile_gap', '按当前基线 + 证据全量重算差距账本', {
+  server.tool('reconcile_gap', '按基线 + 显式约束集 + 证据重算差距账本（缺省空集，不复用上次版本）', {
     project: projectParam,
-  }, log('reconcile_gap', async ({ project }) => {
-    return jsonResult(await reconcile(await ctx(project)));
+    constraint_set_id: z.string().optional().describe('约束集版本；缺省为空集（r-gd4d：不复用上一次的值）'),
+  }, log('reconcile_gap', async ({ project, constraint_set_id }) => {
+    return jsonResult(await reconcile(await ctx(project), undefined, undefined, constraint_set_id));
+  }));
+
+  server.tool('register_constraint_set', '注册版本化约束集（不可变；同 id 异内容拒绝）', {
+    project: projectParam,
+    ...CONSTRAINT_SET_SHAPE,
+  }, log('register_constraint_set', async ({ project, ...args }) => {
+    return jsonResult(await registerConstraintSet(await ctx(project), parseConstraintSet(args)));
+  }));
+
+  server.tool('list_constraint_sets', '列出已注册的约束集版本（只读）', {
+    project: projectParam,
+  }, log('list_constraint_sets', async ({ project }) => {
+    return jsonResult(await listConstraintSets(await ctx(project)));
   }));
 
   server.tool('list_workpacks', '派生工作包：按需求键聚拢开放差距，输出边界契约、依赖、并行组与验收判据（只读）', {

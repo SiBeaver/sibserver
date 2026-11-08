@@ -4,7 +4,6 @@ import { toClaimView, toProposalView } from '@sibeaver/core';
 import type {
   BomConstraint,
   BomRequirement,
-  BomSnapshot,
   BoundaryContract,
   ClaimInput,
   ClaimRecord,
@@ -91,7 +90,7 @@ function deriveFactBoundary(
   requirementKey: string,
   requirement: BomRequirement | undefined,
   gaps: GapRowRecord[],
-  bom: BomSnapshot,
+  constraints: BomConstraint[],
   evidence: EvidenceRecord[],
 ): FactBoundary {
   const writable = new Set<string>();
@@ -129,7 +128,7 @@ function deriveFactBoundary(
     const match = /^constraint:(.+)$/.exec(gap.evidence_source);
     if (match) referenced.add(match[1]);
   }
-  for (const constraint of bom.constraints) {
+  for (const constraint of constraints) {
     const belongs = constraint.requirement_key === requirementKey;
     const referencedByGap = referenced.has(constraint.id);
     if (!belongs && !(referencedByGap && constraint.requirement_key === undefined)) continue;
@@ -237,6 +236,10 @@ export async function listWorkpacks(ctx: OperationContext): Promise<WorkpackList
 
   const rows = await ctx.gap.getOpenRows();
   const evidence = await ctx.gap.getAllEvidence();
+  // 约束派生以“当前注册版本”（最近一次注册的约束集）为准，不依赖最后一次对账参数（r-gd6f）
+  const setRecords = await ctx.gap.listConstraintSets();
+  const currentSet = setRecords.at(-1);
+  const constraints = currentSet?.constraints ?? [];
   const requirementByKey = new Map(baseline.bom.requirements.map(req => [req.key, req]));
 
   const gapsByKey = new Map<string, GapRowRecord[]>();
@@ -251,7 +254,7 @@ export async function listWorkpacks(ctx: OperationContext): Promise<WorkpackList
     const requirement = requirementByKey.get(key);
     const deps = normalizeDeps(key, requirement?.deps);
     const blockedBy = deps.filter(dep => gapsByKey.has(dep));
-    const factBoundary = deriveFactBoundary(key, requirement, gaps, baseline.bom, evidence);
+    const factBoundary = deriveFactBoundary(key, requirement, gaps, constraints, evidence);
     const identities = gaps.map(gapIdentityOf).sort((a, b) => identityKey(a).localeCompare(identityKey(b)));
     const sortedGaps = gaps.slice().sort((a, b) =>
       identityKey(gapIdentityOf(a)).localeCompare(identityKey(gapIdentityOf(b))),

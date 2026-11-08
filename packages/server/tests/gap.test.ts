@@ -2,10 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../core/tests/helpers/test-db.js';
 import { SCHEMA_SQL } from '../../core/src/storage/db.js';
 import { OperationContext } from '@sibeaver/core';
-import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene, fingerprint, signWaiversByCondition } from '../src/gap/engine.js';
+import {
+  setBaseline, reportEvidence, reconcile, listGaps, listConstraintSets, buildEvidenceScene,
+  fingerprint, signWaiversByCondition, registerConstraintSet,
+} from '../src/gap/engine.js';
+import { camelToSnake } from '../src/api/transforms.js';
 import { createSiBeaverApp } from '../src/api/server.js';
 import { registerTools } from '../src/mcp/tools.js';
-import type { BomSnapshot } from '@sibeaver/core';
+import {
+  BomBaselineInput,
+  type BomConstraint, type BomSnapshot, type EvidenceReportInput,
+} from '@sibeaver/core';
 
 const NOW = '2026-07-28T02:00:00.000Z';
 const LATER = '2026-07-28T03:00:00.000Z';
@@ -32,28 +39,63 @@ function bomV1(): BomSnapshot {
         rules: [{ id: 'r-cccc', title: '文档齐备' }],
       },
     ],
-    constraints: [
-      {
-        id: 'c1',
-        title: '认证中间件',
-        dimension: 'security',
-        severity: 'critical',
-        description: '',
-        condition: { evidence_type: 'code_pattern', scope: 'src/', pattern: 'auth', operator: 'present_in_all' },
-        requirement_key: 'dom/req-a',
-      },
-    ],
+    draft_requirements: [],
   };
+}
+
+function constraintsV1(): BomConstraint[] {
+  return [
+    {
+      id: 'c1',
+      title: '认证中间件',
+      dimension: 'security',
+      severity: 'critical',
+      description: '',
+      condition: { evidence_type: 'code_pattern', scope: 'src/', pattern: 'auth', operator: 'present_in_all' },
+      requirement_key: 'dom/req-a',
+    },
+  ];
 }
 
 describe('Gap 引擎三方对账', () => {
   let ctx: OperationContext;
   let close: () => Promise<void>;
+  let dbSql: { unsafe: (query: string) => Promise<unknown> };
+  let currentSetId: string | null;
+
+  /** 注册约束集并设为当前对账版本（内容哈希作 id：内容变即新版本） */
+  const registerSet = async (constraints: BomConstraint[]): Promise<string> => {
+    const id = `cs-${fingerprint(constraints).slice(0, 12)}`;
+    await registerConstraintSet(ctx, { id, items: constraints });
+    currentSetId = id;
+    return id;
+  };
+
+  /** 推进基线：只含 BOM；约束集独立注册并作为 changed-key 重算输入 */
+  const baseline = async (
+    bom: BomSnapshot, now: string, constraints: BomConstraint[] = constraintsV1(),
+  ) => {
+    await registerSet(constraints);
+    return setBaseline(ctx, {
+      commit: bom.commit,
+      requirements: bom.requirements,
+      draft_requirements: bom.draft_requirements,
+      constraint_set_id: currentSetId ?? undefined,
+    }, now);
+  };
+
+  const report = async (items: EvidenceReportInput['items'], now: string) =>
+    reportEvidence(ctx, { items, ...(currentSetId ? { constraint_set_id: currentSetId } : {}) }, now);
+
+  const reconcileAll = async (now: string) =>
+    reconcile(ctx, undefined, now, currentSetId ?? undefined);
 
   beforeEach(async () => {
     const t = await createTestDb();
     ctx = new OperationContext(t.sql, 'default');
+    dbSql = t.sql as unknown as typeof dbSql;
     close = t.close;
+    currentSetId = null;
   });
 
   afterEach(async () => { await close(); });
@@ -65,20 +107,23 @@ describe('Gap 引擎三方对账', () => {
     expect(ledger.gaps).toEqual([]);
   });
 
-  it('首次上报基准缺分区默认空分区，另一分区随同 commit 合并补齐', async () => {
+  it('约束集独立注册：注册与证据上报都不推进基线，基线只含 BOM', async () => {
     const r0 = await setBaseline(ctx, { commit: 'c1', requirements: [] }, NOW);
     expect(r0.changed_keys).toEqual([]);
     const baseline0 = await ctx.gap.getBaseline();
-    expect(baseline0?.bom.constraints).toEqual([]);
-    // 后续同 commit 分区合并补齐 constraints
-    const r1 = await setBaseline(ctx, { commit: 'c1', constraints: bomV1().constraints }, NOW);
-    expect(r1.changed_keys).toEqual(['dom/req-a']);
-    const baseline1 = await ctx.gap.getBaseline();
-    expect(baseline1?.bom.constraints).toHaveLength(1);
+    expect(baseline0?.bom).not.toHaveProperty('constraints');
+    const setId = await registerSet(constraintsV1());
+    // 注册约束集不推进基线
+    expect((await ctx.gap.getBaseline())?.bom_commit).toBe('c1');
+    // 证据上报也不推进基线（r-vb2b）
+    await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }], NOW);
+    expect((await ctx.gap.getBaseline())?.bom_commit).toBe('c1');
+    const ledger = await listGaps(ctx);
+    expect(ledger.constraint_set_id).toBe(setId);
   });
 
   it('规则无人认领输出缺失型（固定 medium），约束无证据不误报违约', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
+    await baseline(bomV1(), NOW);
     const ledger = await listGaps(ctx);
     expect(ledger.bom_commit).toBe('aaa1111');
     expect(ledger.summary.violation).toBe(0);
@@ -97,8 +142,8 @@ describe('Gap 引擎三方对账', () => {
   });
 
   it('证据违约输出 violation，附期望 vs 实际', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
-    await reportEvidence(ctx, { items: [{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }] }, LATER);
+    await baseline(bomV1(), NOW);
+    await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }], LATER);
     const ledger = await listGaps(ctx);
     const c1 = ledger.gaps.find(g => g.source_ref === 'c1');
     expect(c1?.kind).toBe('violation');
@@ -110,13 +155,11 @@ describe('Gap 引擎三方对账', () => {
   });
 
   it('差距消失的唯一路径：证据满足条件（规则被认领）', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
-    await reportEvidence(ctx, {
-      items: [
-        { source_id: 'constraint:c1', payload: { matched: 5, total: 5 } },
-        { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }, { id: 'r-bbbb', file: 'src/a.ts' }] } },
-      ],
-    }, LATER);
+    await baseline(bomV1(), NOW);
+    await report([
+      { source_id: 'constraint:c1', payload: { matched: 5, total: 5 } },
+      { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }, { id: 'r-bbbb', file: 'src/a.ts' }] } },
+    ], LATER);
     const ledger = await listGaps(ctx);
     expect(ledger.gaps.find(g => g.source_ref === 'c1')).toBeUndefined();
     expect(ledger.gaps.find(g => g.source_ref === 'r-aaaa')).toBeUndefined();
@@ -130,7 +173,8 @@ describe('Gap 引擎三方对账', () => {
 
   it('需求过时检测：需求键失配可发现（约束 / sibs 节点 / @bom 标签 / 在办 witem / @sibom 悬空）', async () => {
     const bom = bomV1();
-    bom.constraints.push({
+    const constraints = constraintsV1();
+    constraints.push({
       id: 'c-gone',
       title: '孤儿约束',
       dimension: 'quality',
@@ -153,13 +197,11 @@ describe('Gap 引擎三方对账', () => {
       id: 'e1', source_id: 'witem-1', target_id: 'req-node-1', relation: 'fulfills',
       weight: null, annotation: null, created_at: NOW,
     });
-    await setBaseline(ctx, bom, NOW);
-    await reportEvidence(ctx, {
-      items: [
-        { source_id: 'bom-tags', payload: { tags: [{ key: 'dom/dead', file: 'src/a.ts' }, { key: 'dom/req-a', file: 'src/b.ts' }] } },
-        { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-zzzz', file: 'src/x.ts' }] } },
-      ],
-    }, LATER);
+    await baseline(bom, NOW, constraints);
+    await report([
+      { source_id: 'bom-tags', payload: { tags: [{ key: 'dom/dead', file: 'src/a.ts' }, { key: 'dom/req-a', file: 'src/b.ts' }] } },
+      { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-zzzz', file: 'src/x.ts' }] } },
+    ], LATER);
     const ledger = await listGaps(ctx);
     const stale = ledger.gaps.filter(g => g.kind === 'staleness');
     expect(stale.map(g => g.requirement_key).sort()).toEqual(['(global)', 'dom/dead', 'dom/ghost', 'dom/ghost', 'dom/gone'].sort());
@@ -183,7 +225,7 @@ describe('Gap 引擎三方对账', () => {
       tags: [], created_at: NOW, updated_at: NOW, metadata: {},
       priority: 'medium', source: 'vibespec', source_detail: 'dom/ghost', acceptance: null,
     });
-    await setBaseline(ctx, bomV1(), NOW);
+    await baseline(bomV1(), NOW);
     const ledger = await listGaps(ctx);
     const stale = ledger.gaps.filter(g => g.kind === 'staleness' && g.source_ref === 'req-deprecated' || g.source_ref === 'req-active');
     expect(stale.find(g => g.source_ref === 'req-deprecated')).toBeUndefined();
@@ -205,7 +247,7 @@ describe('Gap 引擎三方对账', () => {
       id: 'e-a', source_id: 'witem-a', target_id: 'req-node-a', relation: 'fulfills',
       weight: null, annotation: null, created_at: NOW,
     });
-    await setBaseline(ctx, bomV1(), NOW);
+    await baseline(bomV1(), NOW);
     const ledger = await listGaps(ctx);
     const reqAGaps = ledger.gaps.filter(g => g.requirement_key === 'dom/req-a');
     expect(reqAGaps.length).toBeGreaterThan(0);
@@ -217,7 +259,7 @@ describe('Gap 引擎三方对账', () => {
   });
 
   it('豁免：指纹不变静默标记，过期或指纹变化重新报', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
+    await baseline(bomV1(), NOW);
     let ledger = await listGaps(ctx);
     const c1 = ledger.gaps.find(g => g.source_ref === 'c1')!;
     await ctx.gap.upsertWaiver({
@@ -236,30 +278,33 @@ describe('Gap 引擎三方对账', () => {
     ledger = await listGaps(ctx);
     expect(ledger.gaps.find(g => g.source_ref === 'c1')?.waiver).toBeNull();
 
-    // 条件变化 → 指纹变化 → 旧豁免不再命中
+    // 重新签一份有效豁免，验证判定依据变化后失效
     await ctx.gap.upsertWaiver({
       fingerprint: fingerprint({ condition_fingerprint: c1.condition_fingerprint, evidence_source: c1.evidence_source }),
       reason: '重新豁免', expires_at: null, created_at: NOW,
     });
-    const bom2 = bomV1();
-    bom2.commit = 'bbb2222';
-    (bom2.constraints[0].condition as { pattern: string }).pattern = 'auth-v2';
-    await setBaseline(ctx, bom2, LATER);
+
+    // 约束判定变化 → 注册新约束集版本并全量重算 → 指纹变化 → 旧豁免不再命中（基线不动）
+    const constraints2 = constraintsV1();
+    (constraints2[0].condition as { pattern: string }).pattern = 'auth-v2';
+    await registerSet(constraints2);
+    await reconcileAll(LATER);
     ledger = await listGaps(ctx);
     const c1v2 = ledger.gaps.find(g => g.source_ref === 'c1')!;
     expect(c1v2.condition_fingerprint).not.toBe(c1.condition_fingerprint);
     expect(c1v2.waiver).toBeNull();
+    expect((await ctx.gap.getBaseline())?.bom_commit).toBe('aaa1111');
   });
 
   it('增量重算：基准前移仅 rebase diff 涉及的需求键，旧行作废留痕', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
+    await baseline(bomV1(), NOW);
     const before = await ctx.gap.getOpenRows();
     const reqARowIds = before.filter(r => r.requirement_key === 'dom/req-a').map(r => r.id).sort();
 
     const bom2 = bomV1();
     bom2.commit = 'bbb2222';
     bom2.requirements[1].rules.push({ id: 'r-cccc2', title: '新增规则' });
-    const result = await setBaseline(ctx, bom2, LATER);
+    const result = await baseline(bom2, LATER);
     expect(result.changed_keys).toEqual(['dom/req-b']);
     expect(result.superseded).toBe(1);
 
@@ -278,20 +323,20 @@ describe('Gap 引擎三方对账', () => {
   });
 
   it('证据指纹不变不重算（skipped），变化才触发', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
-    const r1 = await reportEvidence(ctx, { items: [{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }] }, LATER);
+    await baseline(bomV1(), NOW);
+    const r1 = await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }], LATER);
     expect(r1.accepted).toBe(1);
-    const r2 = await reportEvidence(ctx, { items: [{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }] }, LATER);
+    const r2 = await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }], LATER);
     expect(r2.accepted).toBe(0);
     expect(r2.skipped).toBe(1);
     expect(r2.inserted + r2.refreshed + r2.resolved).toBe(0);
   });
 
   it('gap 账本派生性：全量对账幂等，可由基准 + 证据集完全重建', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
-    await reportEvidence(ctx, { items: [{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }] }, LATER);
+    await baseline(bomV1(), NOW);
+    await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }], LATER);
     const first = await ctx.gap.getOpenRows();
-    const again = await reconcile(ctx, { ruleKeys: null, constraintKeys: null }, LATER);
+    const again = await reconcileAll(LATER);
     expect(again.inserted).toBe(0);
     expect(again.resolved).toBe(0);
     expect(again.refreshed).toBe(0);
@@ -300,19 +345,15 @@ describe('Gap 引擎三方对账', () => {
   });
 
   it('账单证据年龄：有证据行带 evidence_reported_at，无证据行为 null', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
-    await reportEvidence(ctx, {
-      items: [{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 }, reported_at: LATER }],
-    }, LATER);
+    await baseline(bomV1(), NOW);
+    await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 }, reported_at: LATER }], LATER);
     let ledger = await listGaps(ctx);
     expect(ledger.gaps.find(g => g.source_ref === 'c1')?.evidence_reported_at).toBe(LATER);
     // sibom-tags 未上报 → 规则行无证据 → null
     expect(ledger.gaps.find(g => g.source_ref === 'r-aaaa')?.evidence_reported_at).toBeNull();
 
     // 上报 sibom-tags 后未认领规则行带证据年龄（认领证据的时点）
-    await reportEvidence(ctx, {
-      items: [{ source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }] }, reported_at: LATER }],
-    }, LATER);
+    await report([{ source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }] }, reported_at: LATER }], LATER);
     ledger = await listGaps(ctx);
     expect(ledger.gaps.find(g => g.source_ref === 'r-cccc')?.evidence_reported_at).toBe(LATER);
   });
@@ -332,17 +373,15 @@ describe('Gap 引擎三方对账', () => {
       id: 'e-d1', source_id: 'dec-1', target_id: 'req-node-a', relation: 'addresses',
       weight: null, annotation: null, created_at: NOW,
     });
-    await setBaseline(ctx, bomV1(), NOW);
-    await reportEvidence(ctx, {
-      items: [
-        { source_id: 'constraint:c1', payload: { matched: 5, total: 5 }, reported_at: LATER },
-        { source_id: 'bom-tags', payload: { tags: [
-          { key: 'dom/req-a', file: 'src/a.ts' },
-          { key: 'dom/req-a', file: 'src/a2.ts' },
-          { key: 'dom/req-b', file: 'src/b.ts' },
-        ] } },
-      ],
-    }, LATER);
+    await baseline(bomV1(), NOW);
+    await report([
+      { source_id: 'constraint:c1', payload: { matched: 5, total: 5 }, reported_at: LATER },
+      { source_id: 'bom-tags', payload: { tags: [
+        { key: 'dom/req-a', file: 'src/a.ts' },
+        { key: 'dom/req-a', file: 'src/a2.ts' },
+        { key: 'dom/req-b', file: 'src/b.ts' },
+      ] } },
+    ], LATER);
 
     const scene = await buildEvidenceScene(ctx, 'dom/req-a');
     expect(scene.requirement_key).toBe('dom/req-a');
@@ -365,10 +404,10 @@ describe('Gap 引擎三方对账', () => {
   // ── r-gl3c：身份三元组 ────────────────────────────────────
 
   it('r-gl3c：同一差距重复 reconcile 落回同一行，不重复开账', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
-    await reportEvidence(ctx, { items: [{ source_id: 'constraint:c1', payload: { matched:2, total: 5 } }] }, LATER);
+    await baseline(bomV1(), NOW);
+    await report([{ source_id: 'constraint:c1', payload: { matched:2, total: 5 } }], LATER);
     const first = await ctx.gap.getOpenRows();
-    const again = await reconcile(ctx, { ruleKeys: null, constraintKeys: null }, LATER);
+    const again = await reconcileAll(LATER);
     expect(again.inserted).toBe(0);
     const second = await ctx.gap.getOpenRows();
     expect(second).toHaveLength(first.length);
@@ -377,7 +416,8 @@ describe('Gap 引擎三方对账', () => {
 
   it('r-gl3c：不同证据源同 kind 同 key 各自成行', async () => {
     const bom = bomV1();
-    bom.constraints.push({
+    const constraints = constraintsV1();
+    constraints.push({
       id: 'c2',
       title: '第二约束',
       dimension: 'quality',
@@ -386,7 +426,7 @@ describe('Gap 引擎三方对账', () => {
       condition: { evidence_type: 'code_pattern', scope: 'y/', pattern: 'z', operator: 'present' },
       requirement_key: 'dom/req-a',
     });
-    await setBaseline(ctx, bom, NOW);
+    await baseline(bom, NOW, constraints);
     const rows = await ctx.gap.getOpenRows();
     const c1 = rows.find(r => r.source_ref === 'c1');
     const c2 = rows.find(r => r.source_ref === 'c2');
@@ -401,7 +441,8 @@ describe('Gap 引擎三方对账', () => {
 
   it('r-gd7g：证据源变化 → 豁免指纹变 → 该行重新提醒', async () => {
     const bom = bomV1();
-    bom.constraints.push({
+    const constraints = constraintsV1();
+    constraints.push({
       id: 'c2',
       title: '第二约束',
       dimension: 'quality',
@@ -410,7 +451,7 @@ describe('Gap 引擎三方对账', () => {
       condition: { evidence_type: 'code_pattern', scope: 'y/', pattern: 'z', operator: 'present' },
       requirement_key: 'dom/req-a',
     });
-    await setBaseline(ctx, bom, NOW);
+    await baseline(bom, NOW, constraints);
     let ledger = await listGaps(ctx);
     const c1 = ledger.gaps.find(g => g.source_ref === 'c1')!;
     const c2 = ledger.gaps.find(g => g.source_ref === 'c2')!;
@@ -421,21 +462,22 @@ describe('Gap 引擎三方对账', () => {
     expect(ledger.gaps.find(g => g.source_ref === 'c1')?.waiver?.reason).toBe('冻结 c1');
     expect(ledger.gaps.find(g => g.source_ref === 'c2')?.waiver?.reason).toBe('冻结 c2');
 
-    // c1 证据源不变但 condition 变化（约束判定变化）→ 指纹变 → 豁免失效
-    const bom2 = bom;
-    bom2.commit = 'bbb2222';
-    (bom2.constraints[0].condition as { pattern: string }).pattern = 'auth-v3';
-    await setBaseline(ctx, bom2, LATER);
+    // c1 证据源不变但 condition 变化（约束判定变化）→ 新约束集版本 + 全量重算 → 指纹变 → 豁免失效
+    const constraints2 = constraintsV1();
+    constraints2.push(constraints[1]);
+    (constraints2[0].condition as { pattern: string }).pattern = 'auth-v3';
+    await registerSet(constraints2);
+    await reconcileAll(LATER);
     ledger = await listGaps(ctx);
     const c1v2 = ledger.gaps.find(g => g.source_ref === 'c1')!;
     expect(c1v2.condition_fingerprint).not.toBe(c1.condition_fingerprint);
     expect(c1v2.waiver).toBeNull();
-    // c2 未被触及 → 豁免仍在
-    expect(ledger.gaps.find(g => g.source_ref === 'c2')?.waiver?.reason).toBe('冻结 c2');
+    // 约束集版本变化：判定依据含集合哈希，全部约束行豁免统一失效（spec · GapRow.conditionFingerprint）
+    expect(ledger.gaps.find(g => g.source_ref === 'c2')?.waiver).toBeNull();
   });
 
   it('r-gd7g：直接构造不同 evidence_source 的差距行 → 旧豁免不命中', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
+    await baseline(bomV1(), NOW);
     const ledger = await listGaps(ctx);
     const c1 = ledger.gaps.find(g => g.source_ref === 'c1')!;
     await signWaiversByCondition(ctx, c1.condition_fingerprint, '冻结', null);
@@ -444,7 +486,8 @@ describe('Gap 引擎三方对账', () => {
       id: 'manual-row-1', requirement_key: 'dom/req-a', kind: 'absence',
       title: '构造行', detail: 'x', severity: 'medium', source_ref: 'c1',
       evidence_source: 'constraint:c-other',
-      bom_commit: 'aaa1111', condition_fingerprint: c1.condition_fingerprint,
+      bom_commit: 'aaa1111', constraint_set_id: null, constraint_set_hash: null,
+      condition_fingerprint: c1.condition_fingerprint,
       evidence_fingerprint: null, status: 'open', detected_at: NOW,
       resolved_at: null, superseded_at: null,
     });
@@ -456,10 +499,10 @@ describe('Gap 引擎三方对账', () => {
   // ── r-gl5e：增量演化 ──────────────────────────────────────
 
   it('r-gl5e：只报 constraint:c1 证据 → 其他键差距行 unaffected，无全量刷新副作用', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
+    await baseline(bomV1(), NOW);
     const before = await ctx.gap.getOpenRows();
     const reqBIds = before.filter(r => r.requirement_key === 'dom/req-b').map(r => r.id).sort();
-    const r = await reportEvidence(ctx, { items: [{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }] }, LATER);
+    const r = await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }], LATER);
     // 只重算 constraint:c1 命中键：c1 缺失→违约（resolved 1 + inserted 1）；规则认领行不在范围（unchanged 0）
     expect(r.resolved).toBe(1);
     expect(r.inserted).toBe(1);
@@ -473,12 +516,10 @@ describe('Gap 引擎三方对账', () => {
   });
 
   it('r-gl5e：仅 sibom-tags 证据变化 → 重算全部规则认领，约束行不动', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
+    await baseline(bomV1(), NOW);
     const before = await ctx.gap.getOpenRows();
     const c1Row = before.find(r => r.source_ref === 'c1')!;
-    const r = await reportEvidence(ctx, {
-      items: [{ source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }] } }],
-    }, LATER);
+    const r = await report([{ source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }] } }], LATER);
     // r-aaaa 认领后缺失行 resolved；r-bbbb/r-cccc 仍在；c1 不在重算范围，行完全未动
     expect(r.resolved).toBe(1);
     expect(r.inserted).toBe(0);
@@ -493,16 +534,12 @@ describe('Gap 引擎三方对账', () => {
   // ── r-el3c：证据按契约版本组织 ────────────────────────────
 
   it('r-el3c：上报证据带 baseline_commit → 历史留痕可见两条（含旧版）', async () => {
-    await setBaseline(ctx, bomV1(), NOW);
-    await reportEvidence(ctx, {
-      items: [{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 }, baseline_commit: 'aaa1111' }],
-    }, LATER);
+    await baseline(bomV1(), NOW);
+    await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 }, baseline_commit: 'aaa1111' }], LATER);
     const bom2 = bomV1();
     bom2.commit = 'bbb2222';
-    await setBaseline(ctx, bom2, LATER);
-    await reportEvidence(ctx, {
-      items: [{ source_id: 'constraint:c1', payload: { matched: 1, total: 5 }, baseline_commit: 'bbb2222' }],
-    }, LATER);
+    await baseline(bom2, LATER);
+    await report([{ source_id: 'constraint:c1', payload: { matched: 1, total: 5 }, baseline_commit: 'bbb2222' }], LATER);
     const history = await ctx.gap.getEvidenceHistory('constraint:c1');
     expect(history).toHaveLength(2);
     // 倒序：最新在前
@@ -513,37 +550,200 @@ describe('Gap 引擎三方对账', () => {
 
   // ── r-vb4d：sibserver 持有基线指针，分区合并 ──────────────
 
-  it('r-vb4d：同 commit 分区合并幂等（二次无新插入）；commit 前移 → 涉键 superseded 留痕', async () => {
-    const r0 = await setBaseline(ctx, bomV1(), NOW);
+  it('r-vb4d：同 commit 分区合并幂等；约束集注册不推进基线；commit 前移只 rebase 变更键', async () => {
+    const r0 = await baseline(bomV1(), NOW);
     expect(r0.superseded).toBe(0);
 
-    // 同 commit 分区合并（只报 constraints 分区）→ 无变化
-    const r1 = await setBaseline(ctx, { commit: 'aaa1111', constraints: bomV1().constraints }, LATER);
+    // 同 commit 只报 requirements 分区 → 幂等合并，无变化
+    const r1 = await setBaseline(ctx, { commit: 'aaa1111', requirements: bomV1().requirements }, LATER);
     expect(r1.changed_keys).toEqual([]);
     expect(r1.superseded).toBe(0);
     expect(r1.inserted).toBe(0);
     const countAfterFirst = (await ctx.gap.getAllRows()).length;
 
-    // 二次同请求 → 幂等，无新插入
-    const r2 = await setBaseline(ctx, { commit: 'aaa1111', constraints: bomV1().constraints }, LATER);
+    const r2 = await setBaseline(ctx, { commit: 'aaa1111', requirements: bomV1().requirements }, LATER);
     expect(r2.inserted).toBe(0);
     expect(r2.superseded).toBe(0);
     expect((await ctx.gap.getAllRows()).length).toBe(countAfterFirst);
 
-    // commit 前移（只报 constraints 分区，requirements 沿用旧值）→ 涉键 superseded 留痕
-    const newConstraints = [{
-      ...bomV1().constraints[0],
-      condition: { evidence_type: 'code_pattern' as const, scope: 'src/', pattern: 'auth-v9', operator: 'present_in_all' as const },
-    }];
-    const r3 = await setBaseline(ctx, { commit: 'ccc3333', constraints: newConstraints }, LATER);
-    expect(r3.changed_keys).toEqual(['dom/req-a']);
-    expect(r3.superseded).toBeGreaterThan(0);
-    const all = await ctx.gap.getAllRows();
-    expect(all.filter(r => r.status === 'superseded').length).toBeGreaterThan(0);
-    // 基线指针已前移
-    const baseline = await ctx.gap.getBaseline();
-    expect(baseline?.bom_commit).toBe('ccc3333');
-    expect(baseline?.bom.constraints[0].condition).toEqual(newConstraints[0].condition);
+    // 新约束集版本注册 + 重算 → 基线指针不动、旧行不 supersede（覆盖刷新而已）
+    const newConstraints = constraintsV1();
+    (newConstraints[0].condition as { pattern: string }).pattern = 'auth-v9';
+    const setId2 = await registerSet(newConstraints);
+    const rr = await reconcileAll(LATER);
+    expect(rr.constraint_set_id).toBe(setId2);
+    expect((await ctx.gap.getBaseline())?.bom_commit).toBe('aaa1111');
+    expect((await ctx.gap.getAllRows()).filter(r => r.status === 'superseded')).toHaveLength(0);
+
+    // commit 前移、requirements 沿用旧值 → 指针前移，但无变更键即无 supersede
+    const r3 = await setBaseline(ctx, { commit: 'ccc3333', constraint_set_id: setId2 }, LATER);
+    expect(r3.changed_keys).toEqual([]);
+    expect(r3.superseded).toBe(0);
+    expect((await ctx.gap.getBaseline())?.bom_commit).toBe('ccc3333');
+  });
+
+  // ── r-vb6f：账本可由基线与证据重建 ────────────────────────
+
+  it('r-vb6f：清空差距账本后由基线 + 约束集 + 证据重建，账本身份一致', async () => {
+    await baseline(bomV1(), NOW);
+    await report([
+      { source_id: 'constraint:c1', payload: { matched: 2, total: 5 } },
+      { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-aaaa', file: 'src/a.ts' }] } },
+    ], LATER);
+    const identityOfRow = (r: { requirement_key: string; kind: string; evidence_source: string; condition_fingerprint: string }) =>
+      `${r.requirement_key}|${r.kind}|${r.evidence_source}|${r.condition_fingerprint}`;
+    const before = (await ctx.gap.getOpenRows()).map(identityOfRow).sort();
+    expect(before.length).toBeGreaterThan(0);
+
+    await dbSql.unsafe('DELETE FROM gap_rows');
+    expect(await ctx.gap.getOpenRows()).toEqual([]);
+
+    // 清空后重建：不重新上报证据，只由 基线 + 当前约束集 + 已存证据 重算
+    const rebuilt = await reconcileAll(LATER);
+    expect(rebuilt.inserted).toBe(before.length);
+    const after = (await ctx.gap.getOpenRows()).map(identityOfRow).sort();
+    expect(after).toEqual(before);
+    expect(rebuilt.constraint_set_id).not.toBeNull();
+  });
+
+  // ── r-vb5e：draft 身份投影不产生假差距 ────────────────────
+
+  it('r-vb5e：draft 键保留身份投影但不参与对账（无缺失、无 staleness）', async () => {
+    const bom = bomV1();
+    bom.draft_requirements = [{ key: 'dom/draft', title: '草案需求', rules: [{ id: 'r-dddd', title: '草案规则' }] }];
+    await ctx.nodes.insert({
+      id: 'req-draft', type: 'requirement', title: '草案需求', description: '', status: 'proposed',
+      tags: [], created_at: NOW, updated_at: NOW, metadata: {},
+      priority: 'medium', source: 'vibespec', source_detail: 'dom/draft', acceptance: null,
+    });
+    const constraints = constraintsV1();
+    constraints.push({
+      id: 'c-draft',
+      title: '草案约束',
+      dimension: 'quality',
+      severity: 'medium',
+      description: '',
+      condition: { evidence_type: 'code_pattern', scope: 'src/d/', pattern: 'x', operator: 'present' },
+      requirement_key: 'dom/draft',
+    });
+    await baseline(bom, NOW, constraints);
+    const ledger = await listGaps(ctx);
+    expect(ledger.gaps.filter(g => g.requirement_key === 'dom/draft')).toEqual([]);
+    expect(ledger.gaps.find(g => g.source_ref === 'r-dddd')).toBeUndefined();
+    expect(ledger.gaps.find(g => g.source_ref === 'c-draft')).toBeUndefined();
+    // draft 规则若被代码认领也不算悬空
+    await report([{ source_id: 'sibom-tags', payload: { rules: [{ id: 'r-dddd', file: 'src/d.ts' }] } }], LATER);
+    const ledger2 = await listGaps(ctx);
+    expect(ledger2.gaps.find(g => g.source_ref === '@sibom:r-dddd')).toBeUndefined();
+  });
+
+  // ── r-vb7g：判据摘要变化进入探测 ──────────────────────────
+
+  it('r-vb7g：规则标题不变而判据摘要变化 → 基线前移产出增量差距', async () => {
+    const bom1 = bomV1();
+    bom1.requirements[0].rules[0] = { id: 'r-aaaa', title: '认证生效', digest: 'd1' };
+    await baseline(bom1, NOW);
+    const beforeRows = (await ctx.gap.getOpenRows()).filter(r => r.requirement_key === 'dom/req-a').length;
+
+    const bom2 = bomV1();
+    bom2.commit = 'bbb2222';
+    bom2.requirements[0].rules[0] = { id: 'r-aaaa', title: '认证生效', digest: 'd2' };
+    const r = await baseline(bom2, LATER);
+    expect(r.changed_keys).toEqual(['dom/req-a']);
+    expect(r.superseded).toBe(beforeRows);
+    const open = (await ctx.gap.getOpenRows()).filter(x => x.requirement_key === 'dom/req-a');
+    expect(open.length).toBe(beforeRows);
+    expect(open.every(x => x.bom_commit === 'bbb2222')).toBe(true);
+  });
+
+  // ── r-vb2b：证据上报不推进基线 ────────────────────────────
+
+  it('r-vb2b：证据上报不推进基线；约束证据缺约束集版本被拒', async () => {
+    await baseline(bomV1(), NOW);
+    await expect(reportEvidence(ctx, {
+      items: [{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }],
+    }, LATER)).rejects.toThrow(/constraint_set_id/);
+    // 无约束证据的上报同样不推进基线
+    await report([{ source_id: 'sibom-tags', payload: { rules: [] } }], LATER);
+    expect((await ctx.gap.getBaseline())?.bom_commit).toBe('aaa1111');
+  });
+
+  it('约束集：按规格 items 注册、同 id 异内容拒绝、同内容幂等', async () => {
+    const set = await registerConstraintSet(ctx, { id: 'cs-a', items: constraintsV1() });
+    expect(set.item_count).toBe(1);
+    expect(set.items).toHaveLength(1);
+    const again = await registerConstraintSet(ctx, { id: 'cs-a', items: constraintsV1() });
+    expect(again.hash).toBe(set.hash);
+    const changed = constraintsV1();
+    (changed[0].condition as { pattern: string }).pattern = 'auth-x';
+    await expect(registerConstraintSet(ctx, { id: 'cs-a', items: changed })).rejects.toThrow(/不可变/);
+  });
+
+  it('规格 camelCase 基线载荷规范化：constraintSetId / draftRequirements 生效', () => {
+    const parsed = BomBaselineInput.parse(camelToSnake({
+      commit: 'c1',
+      requirements: [],
+      draftRequirements: [{ key: 'dom/draft', title: '草案', rules: [] }],
+      constraintSetId: 'cs-1',
+    }));
+    expect(parsed.constraint_set_id).toBe('cs-1');
+    expect(parsed.draft_requirements).toHaveLength(1);
+  });
+
+  it('约束集换版：行上旧集合的约束行全量重判，删除的约束行 resolve', async () => {
+    const constraints = constraintsV1();
+    constraints.push({
+      id: 'c2',
+      title: '第二约束',
+      dimension: 'quality',
+      severity: 'medium',
+      description: '',
+      condition: { evidence_type: 'code_pattern', scope: 'y/', pattern: 'z', operator: 'present' },
+      requirement_key: 'dom/req-a',
+    });
+    await baseline(bomV1(), NOW, constraints);
+    expect((await ctx.gap.getOpenRows()).find(r => r.source_ref === 'c2')).toBeTruthy();
+
+    // 新版本删除 c2：c2 旧行不在新集合的期望内 → resolve；c1 行刷新到新集合版本
+    await registerSet([constraints[0]]);
+    await reconcileAll(LATER);
+    const open = await ctx.gap.getOpenRows();
+    expect(open.find(r => r.source_ref === 'c2')).toBeUndefined();
+    expect(open.find(r => r.source_ref === 'c1')?.constraint_set_id).toBe(currentSetId);
+  });
+
+  it('基线推进不带约束集：账本视图版本按规格记 null，已注册集不丢失', async () => {
+    await baseline(bomV1(), NOW);
+    const before = await listGaps(ctx);
+    expect(before.constraint_set_id).toBe(currentSetId);
+
+    const bom2 = bomV1();
+    bom2.commit = 'bbb2222';
+    bom2.requirements[1].rules.push({ id: 'r-cccc2', title: '新增规则' });
+    await setBaseline(ctx, { commit: 'bbb2222', requirements: bom2.requirements });
+
+    const after = await listGaps(ctx);
+    expect((await ctx.gap.getBaseline())?.bom_commit).toBe('bbb2222');
+    // 规格：账本视图版本 = 最后一次对账所用版本（空集 → null）；已注册集仍在库中
+    expect(after.constraint_set_id).toBeNull();
+    expect((await listConstraintSets(ctx)).length).toBeGreaterThan(0);
+  });
+
+  it('r-vb6f：清空重建涵盖图谱派生的 staleness 行', async () => {
+    await ctx.nodes.insert({
+      id: 'req-ghost', type: 'requirement', title: '幽灵需求', description: '', status: 'in_execution',
+      tags: [], created_at: NOW, updated_at: NOW, metadata: {},
+      priority: 'medium', source: 'vibespec', source_detail: 'dom/ghost', acceptance: null,
+    });
+    await baseline(bomV1(), NOW);
+    const identity = (r: { requirement_key: string; kind: string; evidence_source: string }) =>
+      `${r.requirement_key}|${r.kind}|${r.evidence_source}`;
+    const before = (await ctx.gap.getOpenRows()).map(identity).sort();
+    expect(before.some(x => x.includes('dom/ghost'))).toBe(true);
+
+    await dbSql.unsafe('DELETE FROM gap_rows');
+    await reconcileAll(LATER);
+    expect((await ctx.gap.getOpenRows()).map(identity).sort()).toEqual(before);
   });
 
   // ── 迁移幂等 ──────────────────────────────────────────────

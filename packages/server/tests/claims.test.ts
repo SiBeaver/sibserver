@@ -18,7 +18,7 @@ function bom(): BomSnapshot {
       { key: 'dom/b', title: '需求B', rules: [{ id: 'r-bbbb', title: '规则B' }], deps: [] },
       { key: 'dom/c', title: '需求C', rules: [{ id: 'r-cccc', title: '规则C' }], deps: [] },
     ],
-    constraints: [],
+    draft_requirements: [],
   };
 }
 
@@ -191,7 +191,6 @@ describe('责任认领（claims）', () => {
     await setBaseline(ctx, {
       commit: 'b3',
       requirements: changed.requirements,
-      constraints: changed.constraints,
     });
 
     expect((await ctx.proposals.getProposal(proposal.id))?.status).toBe('confirmed');
@@ -230,7 +229,6 @@ describe('责任认领（claims）', () => {
     await setBaseline(ctx, {
       commit: 'b2',
       requirements: changed.requirements,
-      constraints: changed.constraints,
     });
 
     expect((await getClaim(ctx, claim.id)).status).toBe('expired');

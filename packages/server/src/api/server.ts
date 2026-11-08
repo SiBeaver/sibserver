@@ -24,7 +24,7 @@ import { setDirectSibs } from '../sibs-client.js';
 import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
 import { snakeToCamel, camelToSnake, kebabToSnake, toApiEvent } from './transforms.js';
-import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene, signWaiversByCondition } from '../gap/engine.js';
+import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene, signWaiversByCondition, registerConstraintSet, listConstraintSets } from '../gap/engine.js';
 import {
   claimWorkpack, confirmReplanProposal, listProposals, listWorkpacks,
   narrowWorkpackBoundary, proposeContractChange, proposeReplan,
@@ -38,9 +38,9 @@ import {
 import {
   BomBaselineInput, ClaimInput, ClaimCreateInput, ClaimNarrowInput, ClaimReleaseInput,
   ClaimRenewInput, ClaimReportInput, ClaimRevokeInput, ClaimStatus,
-  ConfirmProposalInput, ContractProposalInput,
+  ConfirmProposalInput, ConstraintSetInput, ContractProposalInput,
   EvidenceReportInput, ExecutorInput, ExecutorProfileInput, NarrowBoundaryInput,
-  ProposalStatus, ReplanProposalInput, ReportInput, WaiverInput, type BomConstraint,
+  ProposalStatus, ReplanProposalInput, ReportInput, WaiverInput,
 } from '@sibeaver/core';
 
 // ============================================================
@@ -496,7 +496,7 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
 
   app.post('/:project/api/v1/gap/baseline', async (c) => {
     const slug = c.req.param('project');
-    const parsed = BomBaselineInput.safeParse(await c.req.json());
+    const parsed = BomBaselineInput.safeParse(camelToSnake(await c.req.json()));
     if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
     try {
       return json(c, await setBaseline(getCtx(slug), parsed.data));
@@ -505,9 +505,11 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     }
   });
 
-  app.post('/:project/api/v1/gap/evidence', async (c) => {
-    const slug = c.req.param('project');
+  app.post('/:project/api/v1/gap/evidence', async (c) => {    const slug = c.req.param('project');
     const body = await c.req.json();
+    if (body.constraints !== undefined) {
+      return json(c, { error: 'constraints 不再随证据上报——请先 POST /gap/constraints 注册约束集，再以 constraintSetId 引用' }, 400);
+    }
     // items 逐项规范化（camelCase 别名），payload 原样传递
     const itemsRaw = Array.isArray(body.items) ? body.items : [];
     const items = itemsRaw.map((it: any) => ({
@@ -516,29 +518,45 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
       reported_at: it.reported_at ?? it.reportedAt,
       baseline_commit: it.baseline_commit ?? it.baselineCommit,
     }));
-    const constraints = body.constraints !== undefined
-      ? (camelToSnake(body.constraints) as BomConstraint[])
-      : undefined;
-    const commit = body.commit ?? undefined;
-    const parsed = EvidenceReportInput.safeParse({ items, ...(constraints !== undefined ? { constraints } : {}), ...(commit !== undefined ? { commit } : {}) });
+    const constraintSetId = body.constraint_set_id ?? body.constraintSetId;
+    const parsed = EvidenceReportInput.safeParse({
+      items,
+      ...(constraintSetId !== undefined ? { constraint_set_id: constraintSetId } : {}),
+    });
     if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
     try {
-      const ctx = getCtx(slug);
-      // constraints 分区先并入基线（同 commit 语义；commit 与基线不同即基线前移 r-vb4d）
-      if (constraints !== undefined) {
-        const baseline = await ctx.gap.getBaseline();
-        if (!baseline && commit === undefined) {
-          return json(c, { error: '无基线时上报 constraints 分区需携带 commit' }, 400);
-        }
-        await setBaseline(ctx, {
-          commit: commit ?? baseline?.bom_commit ?? '',
-          constraints,
-        });
-      }
-      return json(c, await reportEvidence(ctx, parsed.data));
+      // 证据上报只写证据并重算；绝不推进基线（r-vb2b）
+      return json(c, await reportEvidence(getCtx(slug), parsed.data));
+    } catch (e: any) {
+      return json(c, { error: e.message }, /^未设基准/.test(e.message) ? 409 : 400);
+    }
+  });
+
+  app.post('/:project/api/v1/gap/constraints', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = ConstraintSetInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await registerConstraintSet(getCtx(slug), parsed.data));
     } catch (e: any) {
       return json(c, { error: e.message }, 409);
     }
+  });
+
+  app.get('/:project/api/v1/gap/constraints', async (c) => {
+    return json(c, await listConstraintSets(getCtx(c.req.param('project'))));
+  });
+
+  app.get('/:project/api/v1/gap/constraints/:id', async (c) => {
+    const set = await getCtx(c.req.param('project')).gap.getConstraintSet(c.req.param('id'));
+    if (!set) return json(c, { error: '约束集不存在' }, 404);
+    return json(c, {
+      id: set.set_id,
+      hash: set.set_hash,
+      item_count: set.constraints.length,
+      created_at: set.created_at,
+      items: set.constraints,
+    });
   });
 
   app.post('/:project/api/v1/gap/waivers', async (c) => {
@@ -570,9 +588,11 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   app.post('/:project/api/v1/gap/reconcile', async (c) => {
     const slug = c.req.param('project');
     try {
-      return json(c, await reconcile(getCtx(slug)));
+      const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+      const constraintSetId = (body.constraint_set_id ?? body.constraintSetId) as string | undefined;
+      return json(c, await reconcile(getCtx(slug), undefined, undefined, constraintSetId));
     } catch (e: any) {
-      return json(c, { error: e.message }, 409);
+      return json(c, { error: e.message }, /^未设基准/.test(e.message) ? 409 : 400);
     }
   });
 

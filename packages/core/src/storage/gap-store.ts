@@ -1,9 +1,11 @@
 import type { Sql, JsonbParam } from './db.js';
+import { BomSnapshot } from '../gap/types.js';
 import type {
-  BomSnapshot,
+  ConstraintSetRecord,
   EvidenceLogRecord,
   EvidenceRecord,
   GapRowRecord,
+  GapStateRecord,
   WaiverRecord,
 } from '../gap/types.js';
 
@@ -32,7 +34,8 @@ export class GapStore {
     if (rows.length === 0) return null;
     return {
       bom_commit: rows[0].bom_commit,
-      bom: parseJson<BomSnapshot>(rows[0].bom),
+      // 归一化：旧快照里的 constraints 分区被剥除（约束集已独立版本化），draft_requirements 补缺省
+      bom: BomSnapshot.parse(parseJson<unknown>(rows[0].bom)),
       updated_at: rows[0].updated_at,
     };
   }
@@ -118,25 +121,98 @@ export class GapStore {
     }));
   }
 
+  // ── 约束集（独立版本化对账输入）───────────────────────────
+
+  async getConstraintSet(setId: string): Promise<ConstraintSetRecord | null> {
+    const rows = await this.sql`
+      SELECT set_id, set_hash, constraints, created_at FROM gap_constraint_sets
+      WHERE project_id = ${this.projectId} AND set_id = ${setId}
+    `;
+    if (rows.length === 0) return null;
+    return {
+      set_id: rows[0].set_id,
+      set_hash: rows[0].set_hash,
+      constraints: parseJson(rows[0].constraints),
+      created_at: rows[0].created_at,
+    };
+  }
+
+  async listConstraintSets(): Promise<ConstraintSetRecord[]> {
+    const rows = await this.sql`
+      SELECT set_id, set_hash, constraints, created_at FROM gap_constraint_sets
+      WHERE project_id = ${this.projectId} ORDER BY created_at ASC
+    `;
+    return rows.map(r => ({
+      set_id: r.set_id,
+      set_hash: r.set_hash,
+      constraints: parseJson(r.constraints),
+      created_at: r.created_at,
+    }));
+  }
+
+  async insertConstraintSet(record: ConstraintSetRecord): Promise<void> {
+    await this.sql`
+      INSERT INTO gap_constraint_sets (project_id, set_id, set_hash, constraints, created_at)
+      VALUES (${this.projectId}, ${record.set_id}, ${record.set_hash},
+              ${this.sql.json(record.constraints as JsonbParam)}, ${record.created_at})
+      ON CONFLICT (project_id, set_id) DO NOTHING
+    `;
+  }
+
+  async getGapState(): Promise<GapStateRecord | null> {
+    const rows = await this.sql`
+      SELECT last_constraint_set_id, last_constraint_set_hash, updated_at FROM gap_state
+      WHERE project_id = ${this.projectId}
+    `;
+    if (rows.length === 0) return null;
+    return {
+      last_constraint_set_id: rows[0].last_constraint_set_id ?? null,
+      last_constraint_set_hash: rows[0].last_constraint_set_hash ?? null,
+      updated_at: rows[0].updated_at ?? null,
+    };
+  }
+
+  async setGapState(state: GapStateRecord): Promise<void> {
+    await this.sql`
+      INSERT INTO gap_state (project_id, last_constraint_set_id, last_constraint_set_hash, updated_at)
+      VALUES (${this.projectId}, ${state.last_constraint_set_id}, ${state.last_constraint_set_hash}, ${state.updated_at})
+      ON CONFLICT (project_id) DO UPDATE SET
+        last_constraint_set_id = excluded.last_constraint_set_id,
+        last_constraint_set_hash = excluded.last_constraint_set_hash,
+        updated_at = excluded.updated_at
+    `;
+  }
+
   // ── 差距行 ────────────────────────────────────────────────
 
   async insertRow(row: GapRowRecord): Promise<void> {
     await this.sql`
       INSERT INTO gap_rows (id, project_id, requirement_key, kind, title, detail, severity,
-                            source_ref, evidence_source, bom_commit, condition_fingerprint, evidence_fingerprint,
+                            source_ref, evidence_source, bom_commit, constraint_set_id, constraint_set_hash,
+                            condition_fingerprint, evidence_fingerprint,
                             status, detected_at, resolved_at, superseded_at)
       VALUES (${row.id}, ${this.projectId}, ${row.requirement_key}, ${row.kind}, ${row.title},
               ${row.detail}, ${row.severity}, ${row.source_ref}, ${row.evidence_source}, ${row.bom_commit},
+              ${row.constraint_set_id}, ${row.constraint_set_hash},
               ${row.condition_fingerprint}, ${row.evidence_fingerprint}, ${row.status},
               ${row.detected_at}, ${row.resolved_at}, ${row.superseded_at})
       ON CONFLICT (project_id, requirement_key, kind, evidence_source) WHERE status = 'open' DO NOTHING
     `;
   }
 
-  async refreshRow(id: string, detail: string, evidenceFingerprint: string | null, detectedAt: string): Promise<void> {
+  async refreshRow(
+    id: string,
+    detail: string,
+    evidenceFingerprint: string | null,
+    detectedAt: string,
+    conditionFingerprint: string,
+    constraintSetId: string | null,
+    constraintSetHash: string | null,
+  ): Promise<void> {
     await this.sql`
       UPDATE gap_rows SET detail = ${detail}, evidence_fingerprint = ${evidenceFingerprint},
-        detected_at = ${detectedAt}
+        detected_at = ${detectedAt}, condition_fingerprint = ${conditionFingerprint},
+        constraint_set_id = ${constraintSetId}, constraint_set_hash = ${constraintSetHash}
       WHERE id = ${id} AND project_id = ${this.projectId}
     `;
   }
