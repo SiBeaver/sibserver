@@ -1,9 +1,10 @@
 import { ulid } from 'ulidx';
 import type { OperationContext } from './context.js';
 import type { Edge } from '../edges/types.js';
-import { isValidTransition, RISK_TRANSITIONS, TECH_DEBT_TRANSITIONS } from '../lifecycle/machines.js';
+import { describeTransitionRejection, isValidTransition, RISK_TRANSITIONS, TECH_DEBT_TRANSITIONS } from '../lifecycle/machines.js';
+import { echoId, nodeIdMissHint } from '../nodes/id.js';
 import type { RiskNode, TechDebtNode } from '../nodes/types.js';
-import { validateRelation } from '../edges/types.js';
+import { validateRelation, describeRelationTypes } from '../edges/types.js';
 import type { NodeType } from '../nodes/types.js';
 
 // ============================================================
@@ -44,6 +45,11 @@ export async function identifyRisk(ctx: OperationContext, input: IdentifyRiskInp
     const edges_created: Edge[] = [];
 
     for (const witemId of input.affected_witems ?? []) {
+      const witem = await tx.nodes.getById(witemId);
+      if (!witem) throw new Error(`受影响工作项不存在：${echoId(witemId)}${nodeIdMissHint(witemId)}`);
+      if (witem.type !== 'witem' || !validateRelation('blocks', 'risk', witem.type as NodeType)) {
+        throw new Error(`受影响工作项类型不符：${echoId(witemId)} 是 ${witem.type}；${describeRelationTypes('blocks')}`);
+      }
       const edge: Edge = {
         id: ulid(), source_id: risk.id, target_id: witemId,
         relation: 'blocks', weight: null, annotation: null, created_at: now,
@@ -80,16 +86,15 @@ export interface UpdateRiskInput {
 export async function updateRisk(ctx: OperationContext, input: UpdateRiskInput) {
   return ctx.withTx(async (tx) => {
     const node = await tx.nodes.getById(input.risk_id);
-    if (!node || node.type !== 'risk') {
-      throw new Error(`风险不存在：${input.risk_id}`);
-    }
+    if (!node) throw new Error(`风险不存在：${echoId(input.risk_id)}${nodeIdMissHint(input.risk_id)}`);
+    if (node.type !== 'risk') throw new Error(`风险类型不符：${echoId(input.risk_id)} 是 ${node.type}；需要 risk 类型节点`);
 
     const risk = node as RiskNode;
     const diffs: any[] = [];
 
     if (input.new_status && input.new_status !== risk.status) {
       if (!isValidTransition(RISK_TRANSITIONS, risk.status, input.new_status)) {
-        throw new Error(`无效状态迁移：${risk.status} → ${input.new_status}`);
+        throw new Error(describeTransitionRejection(RISK_TRANSITIONS, risk.status, input.new_status));
       }
       diffs.push({ field: 'status', old_value: risk.status, new_value: input.new_status });
     }
@@ -159,7 +164,10 @@ export async function registerTechDebt(ctx: OperationContext, input: RegisterTec
     if (input.caused_by) {
       const cause = await tx.nodes.getById(input.caused_by);
       if (!cause || !validateRelation('creates', cause.type as NodeType, 'tech_debt')) {
-        throw new Error(`来源决策不存在或类型不符：${input.caused_by}`);
+        const detail = cause
+          ? `（实际类型 ${cause.type}；${describeRelationTypes('creates')}）`
+          : nodeIdMissHint(input.caused_by);
+        throw new Error(`来源决策不存在或类型不符：${echoId(input.caused_by)}${detail}`);
       }
       const edge: Edge = {
         id: ulid(), source_id: input.caused_by, target_id: techDebt.id,
@@ -170,6 +178,11 @@ export async function registerTechDebt(ctx: OperationContext, input: RegisterTec
     }
 
     for (const blockId of input.blocks ?? []) {
+      const target = await tx.nodes.getById(blockId);
+      if (!target) throw new Error(`被阻碍节点不存在：${echoId(blockId)}${nodeIdMissHint(blockId)}`);
+      if (target.type !== 'witem' || !validateRelation('blocks', 'tech_debt', target.type as NodeType)) {
+        throw new Error(`被阻碍节点类型不符：${echoId(blockId)} 是 ${target.type}；${describeRelationTypes('blocks')}`);
+      }
       const edge: Edge = {
         id: ulid(), source_id: techDebt.id, target_id: blockId,
         relation: 'blocks', weight: null, annotation: null, created_at: now,

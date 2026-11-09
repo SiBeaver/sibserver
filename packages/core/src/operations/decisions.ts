@@ -2,7 +2,10 @@ import { ulid } from 'ulidx';
 import type { OperationContext } from './context.js';
 import type { DecisionNode } from '../nodes/types.js';
 import type { Edge } from '../edges/types.js';
-import { isValidTransition, DECISION_TRANSITIONS } from '../lifecycle/machines.js';
+import { validateRelation } from '../edges/types.js';
+import type { NodeType } from '../nodes/types.js';
+import { describeTransitionRejection, isValidTransition, DECISION_TRANSITIONS } from '../lifecycle/machines.js';
+import { echoId, nodeIdMissHint } from '../nodes/id.js';
 
 // ============================================================
 // record_decision — 记录决策
@@ -69,8 +72,13 @@ export async function recordDecision(ctx: OperationContext, input: RecordDecisio
     const risks_created: any[] = [];
     const tech_debt_created: any[] = [];
 
-    // 关联工作项
+    // 关联工作项：ID 须完整 ULID，且关系必须允许 decision → 目标类型
     for (const witemId of input.related_witems ?? []) {
+      const witem = await tx.nodes.getById(witemId);
+      if (!witem) throw new Error(`关联工作项不存在：${echoId(witemId)}${nodeIdMissHint(witemId)}`);
+      if (witem.type !== 'witem' || !validateRelation('relates_to', 'decision', witem.type as NodeType)) {
+        throw new Error(`关联工作项类型不符：${echoId(witemId)} 是 ${witem.type}；related_witems 只接受 witem 类型节点`);
+      }
       const edge: Edge = {
         id: ulid(), source_id: decision.id, target_id: witemId,
         relation: 'relates_to', weight: null, annotation: null, created_at: now,
@@ -82,22 +90,24 @@ export async function recordDecision(ctx: OperationContext, input: RecordDecisio
     // 取代旧决策
     if (input.supersedes) {
       const oldDecision = await tx.nodes.getById(input.supersedes);
-      if (oldDecision && oldDecision.type === 'decision') {
-        const updated = {
-          ...oldDecision as DecisionNode,
-          status: 'superseded' as const,
-          superseded_by: decision.id,
-          updated_at: now,
-        };
-        await tx.nodes.update(updated);
-
-        const edge: Edge = {
-          id: ulid(), source_id: decision.id, target_id: input.supersedes,
-          relation: 'supersedes', weight: null, annotation: null, created_at: now,
-        };
-        await tx.edges.insert(edge);
-        edges_created.push(edge);
+      if (!oldDecision) throw new Error(`被取代决策不存在：${echoId(input.supersedes)}${nodeIdMissHint(input.supersedes)}`);
+      if (oldDecision.type !== 'decision' || !validateRelation('supersedes', oldDecision.type as NodeType, 'decision')) {
+        throw new Error(`被取代决策类型不符：${echoId(input.supersedes)} 是 ${oldDecision.type}；supersedes 只接受 decision 类型节点`);
       }
+      const updated = {
+        ...oldDecision as DecisionNode,
+        status: 'superseded' as const,
+        superseded_by: decision.id,
+        updated_at: now,
+      };
+      await tx.nodes.update(updated);
+
+      const edge: Edge = {
+        id: ulid(), source_id: decision.id, target_id: input.supersedes,
+        relation: 'supersedes', weight: null, annotation: null, created_at: now,
+      };
+      await tx.edges.insert(edge);
+      edges_created.push(edge);
     }
 
     // 创建风险
@@ -170,13 +180,12 @@ export interface UpdateDecisionStatusInput {
 export async function updateDecisionStatus(ctx: OperationContext, input: UpdateDecisionStatusInput) {
   return ctx.withTx(async (tx) => {
     const node = await tx.nodes.getById(input.decision_id);
-    if (!node || node.type !== 'decision') {
-      throw new Error(`决策不存在：${input.decision_id}`);
-    }
+    if (!node) throw new Error(`决策不存在：${echoId(input.decision_id)}${nodeIdMissHint(input.decision_id)}`);
+    if (node.type !== 'decision') throw new Error(`决策类型不符：${echoId(input.decision_id)} 是 ${node.type}；需要 decision 类型节点`);
 
     const oldStatus = node.status;
-    if (!isValidTransition(DECISION_TRANSITIONS, oldStatus as any, input.new_status)) {
-      throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
+    if (!isValidTransition(DECISION_TRANSITIONS, oldStatus, input.new_status)) {
+      throw new Error(describeTransitionRejection(DECISION_TRANSITIONS, oldStatus, input.new_status));
     }
 
     const updated: DecisionNode = {

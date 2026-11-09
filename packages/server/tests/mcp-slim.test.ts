@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { OperationContext } from '@sibeaver/core';
+import type { Sql } from '@sibeaver/core';
 import { registerTools, slimEnvelope, slimSearchResult, slimBatchResult, slimProjectStateResult } from '../src/mcp/tools.js';
 import { createTestDb } from '../../core/tests/helpers/test-db.js';
 
@@ -22,9 +23,11 @@ describe('MCP 响应瘦身', () => {
   let ctx: OperationContext;
   let handlers: Record<string, (args: any) => Promise<unknown>>;
   let close: () => void;
+  let sql: Sql;
 
   beforeEach(async () => {
     const db = await createTestDb();
+    sql = db.sql;
     ctx = new OperationContext(db.sql, 'default');
     close = db.close;
     handlers = captureHandlers(ctx);
@@ -131,6 +134,172 @@ describe('MCP 响应瘦身', () => {
     expect(data).not.toHaveProperty('requirements');
     expect(data.openRequirements).toHaveLength(1);
     expect(data.statistics).toEqual({ totalRequirements: 1 });
+  });
+
+  // MCP 协议服务 r-mp5e / r-mp6f：拒绝必须可自纠（回显判据），节点 ID 须完整 ULID 且不做前缀匹配。
+  describe('拒绝自纠（r-mp5e / r-mp6f）', () => {
+    async function defineW(title: string): Promise<string> {
+      const res = await handlers['define_witem']({ title, horizon: 'short', priority: 'medium' });
+      return JSON.parse(res.content[0].text).witem.id;
+    }
+
+    it('非法关系回显允许的源/目标节点类型集合', async () => {
+      const a = await defineW('A');
+      const b = await defineW('B');
+      await expect(handlers['link_nodes']({
+        source_id: a, target_id: b, relation: 'fulfills',
+      })).rejects.toThrow(/无效关系「fulfills」：witem → witem；允许的源类型：\[witem\]，允许的目标类型：\[requirement\]/);
+    });
+
+    it('非法状态迁移回显当前状态与全部合法目标状态', async () => {
+      const id = await defineW('W');
+      await handlers['update_witem_status']({ witem_id: id, new_status: 'deferred', reason: '延后' });
+      await expect(handlers['update_witem_status']({
+        witem_id: id, new_status: 'achieved', reason: '跳过 active',
+      })).rejects.toThrow(/无效状态迁移：deferred → achieved；当前状态 deferred，合法目标状态：\[active, abandoned\]/);
+    });
+
+    it('节点 ID 未命中回显传入值与所需形态', async () => {
+      await expect(handlers['get_node_context']({ node_id: 'nonexistent' }))
+        .rejects.toThrow(/节点不存在：nonexistent（节点 ID 须为 26 位完整 ULID，不接受缩写或前缀匹配）/);
+    });
+
+    it('缩写或前缀 ULID 不被前缀匹配', async () => {
+      const id = await defineW('W');
+      await expect(handlers['get_node_context']({ node_id: id.slice(0, 12) }))
+        .rejects.toThrow(/不接受缩写或前缀匹配/);
+    });
+
+    it('合法完整 ULID 仍可定位', async () => {
+      const id = await defineW('W');
+      const res = await handlers['get_node_context']({ node_id: id });
+      expect(JSON.parse(res.content[0].text).node.id).toBe(id);
+    });
+
+    it('26 位但字符集非法时提示 Crockford 形态', async () => {
+      const badCharset = '01ARZ3NDEKTSV4RRFFQ69G5FAV'.slice(0, 25) + 'I';
+      await expect(handlers['get_node_context']({ node_id: badCharset }))
+        .rejects.toThrow(/Crockford Base32 ULID/);
+    });
+
+    it('拒绝不改变数据：非法关系不写入边', async () => {
+      const a = await defineW('A');
+      const b = await defineW('B');
+      const before = (await sql`SELECT count(*)::int AS n FROM edges`)[0].n;
+      await expect(handlers['link_nodes']({ source_id: a, target_id: b, relation: 'fulfills' }))
+        .rejects.toThrow(/无效关系/);
+      const after = (await sql`SELECT count(*)::int AS n FROM edges`)[0].n;
+      expect(after).toBe(before);
+    });
+
+    it('拒绝不改变数据：非法迁移不改状态', async () => {
+      const id = await defineW('W');
+      await handlers['update_witem_status']({ witem_id: id, new_status: 'deferred', reason: '延后' });
+      await expect(handlers['update_witem_status']({ witem_id: id, new_status: 'achieved', reason: '跳过' }))
+        .rejects.toThrow(/无效状态迁移/);
+      const res = await handlers['get_node_context']({ node_id: id });
+      expect(JSON.parse(res.content[0].text).node.status).toBe('deferred');
+    });
+
+    it('record_decision 的关联工作项 ID 未命中时拒绝且不回写', async () => {
+      const before = (await sql`SELECT count(*)::int AS n FROM nodes`)[0].n;
+      await expect(handlers['record_decision']({
+        title: 'd', context: 'c', rationale: 'r', related_witems: ['nonexistent'],
+      })).rejects.toThrow(/关联工作项不存在：nonexistent（节点 ID 须为 26 位完整 ULID，不接受缩写或前缀匹配）/);
+      const after = (await sql`SELECT count(*)::int AS n FROM nodes`)[0].n;
+      expect(after).toBe(before);
+    });
+
+    it('record_decision 的 supersedes 未命中时拒绝且不回写', async () => {
+      const before = (await sql`SELECT count(*)::int AS n FROM nodes`)[0].n;
+      await expect(handlers['record_decision']({
+        title: 'd', context: 'c', rationale: 'r', supersedes: 'nonexistent',
+      })).rejects.toThrow(/被取代决策不存在：nonexistent/);
+      const after = (await sql`SELECT count(*)::int AS n FROM nodes`)[0].n;
+      expect(after).toBe(before);
+    });
+
+    it('identify_risk 的受影响工作项 ID 未命中时拒绝且不回写', async () => {
+      const before = (await sql`SELECT count(*)::int AS n FROM nodes`)[0].n;
+      await expect(handlers['identify_risk']({
+        title: 'r', description: 'd', likelihood: 'high', impact: 'high',
+        affected_witems: ['nonexistent'],
+      })).rejects.toThrow(/受影响工作项不存在：nonexistent/);
+      const after = (await sql`SELECT count(*)::int AS n FROM nodes`)[0].n;
+      expect(after).toBe(before);
+    });
+
+    it('类型不符的关系拒绝回显关系允许的源/目标集合（derived_from）', async () => {
+      const d = await handlers['record_decision']({ title: 'd', context: 'c', rationale: 'r' });
+      const decisionId = JSON.parse(d.content[0].text).decision.id;
+      await expect(handlers['record_knowledge']({
+        title: 'k', description: 'desc', domain: 'd', source: 's', derived_from: [decisionId],
+      })).rejects.toThrow(/允许的源类型：\[witem\]，允许的目标类型：\[knowledge\]/);
+    });
+
+    it('类型不符的关系拒绝回显关系允许的源/目标集合（creates）', async () => {
+      const w = await defineW('W');
+      await expect(handlers['register_tech_debt']({
+        title: 't', description: 'd', severity: 'high', affected_area: 'a', cost_of_delay: 'c',
+        caused_by: w,
+      })).rejects.toThrow(/允许的源类型：\[decision\]，允许的目标类型：\[tech_debt, risk\]/);
+    });
+
+    it('record_knowledge 的 invalidates 未命中时拒绝且不回写', async () => {
+      const before = (await sql`SELECT count(*)::int AS n FROM nodes`)[0].n;
+      await expect(handlers['record_knowledge']({
+        title: 'k', description: 'd', domain: 'x', source: 's', invalidates: ['nonexistent'],
+      })).rejects.toThrow(/被取代知识不存在：nonexistent（节点 ID 须为 26 位完整 ULID，不接受缩写或前缀匹配）/);
+      expect((await sql`SELECT count(*)::int AS n FROM nodes`)[0].n).toBe(before);
+    });
+
+    it('related_witems 拒绝非 witem 类型并回显参数判据', async () => {
+      const d = await handlers['record_decision']({ title: 'd', context: 'c', rationale: 'r' });
+      const decisionId = JSON.parse(d.content[0].text).decision.id;
+      await expect(handlers['record_decision']({
+        title: 'd2', context: 'c', rationale: 'r', related_witems: [decisionId],
+      })).rejects.toThrow(/related_witems 只接受 witem 类型节点/);
+    });
+
+    it('get_claim 未命中回显 ID 与认领形态', async () => {
+      await expect(handlers['get_claim']({ claim_id: 'nonexistent' }))
+        .rejects.toThrow(/认领不存在：nonexistent（认领 ID 须为 26 位完整 ULID，不接受缩写或前缀匹配）/);
+    });
+
+    it('提案未命中回显 ID 与形态；已处理提案再确认回显当前状态', async () => {
+      await expect(handlers['confirm_replan_proposal']({
+        proposal_id: 'nonexistent', confirmed_by: 'me',
+      })).rejects.toThrow(/提案不存在：nonexistent（提案 ID 须为 26 位完整 ULID，不接受缩写或前缀匹配）/);
+
+      const p = await handlers['propose_replan']({ proposer: 'p', summary: 's' });
+      const proposalId = JSON.parse(p.content[0].text).id;
+      await handlers['confirm_replan_proposal']({ proposal_id: proposalId, confirmed_by: 'me' });
+      await expect(handlers['confirm_replan_proposal']({
+        proposal_id: proposalId, confirmed_by: 'me',
+      })).rejects.toThrow(/无效状态迁移：confirmed → confirmed；当前状态 confirmed，合法目标状态：\[（无）\]/);
+    });
+
+    it('已完成根节点被过滤时不误报不存在', async () => {
+      const id = await defineW('W');
+      await handlers['update_witem_status']({ witem_id: id, new_status: 'achieved', reason: 'done' });
+      const res = await handlers['get_roadmap']({ root_witem: id });
+      expect(JSON.parse(res.content[0].text).roadmap).toEqual([]);
+    });
+
+    it('存在但类型不符时回显实际类型（不误报未命中）', async () => {
+      const d = await handlers['record_decision']({ title: 'd', context: 'c', rationale: 'r' });
+      const decisionId = JSON.parse(d.content[0].text).decision.id;
+      await expect(handlers['update_witem_status']({
+        witem_id: decisionId, new_status: 'achieved', reason: 'x',
+      })).rejects.toThrow(/工作项类型不符：.* 是 decision；需要 witem 类型节点/);
+    });
+
+    it('invalidates 类型不符时回显参数判据', async () => {
+      const w = await defineW('W');
+      await expect(handlers['record_knowledge']({
+        title: 'k', description: 'd', domain: 'x', source: 's', invalidates: [w],
+      })).rejects.toThrow(/被取代知识类型不符：.* 是 witem；invalidates 只接受 knowledge 类型节点/);
+    });
   });
 
   afterEach(async () => { await close(); });

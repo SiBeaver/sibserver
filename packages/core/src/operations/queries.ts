@@ -1,6 +1,7 @@
 import type { OperationContext } from './context.js';
 import type { CognitiveNode } from '../nodes/types.js';
 import type { Edge } from '../edges/types.js';
+import { echoId, nodeIdMissHint } from '../nodes/id.js';
 
 // ============================================================
 // get_roadmap — 获取工作项路线图（树状结构）
@@ -56,9 +57,12 @@ export async function getRoadmap(ctx: OperationContext, input: GetRoadmapInput =
   }
 
   if (input.root_witem) {
+    // 根节点先独立判定：存在但被 include_completed 过滤 ≠ 未命中
+    const root = await ctx.nodes.getById(input.root_witem);
+    if (!root) throw new Error(`工作项不存在：${echoId(input.root_witem)}${nodeIdMissHint(input.root_witem)}`);
+    if (root.type !== 'witem') throw new Error(`工作项类型不符：${echoId(input.root_witem)} 是 ${root.type}；需要 witem 类型节点`);
     const tree = await buildTree(input.root_witem, 0);
-    if (!tree) throw new Error(`工作项不存在：${input.root_witem}`);
-    return { roadmap: [tree] };
+    return { roadmap: tree ? [tree] : [] };
   }
 
   // 找所有顶层 witem（没有父 witem 的）
@@ -151,7 +155,7 @@ export async function decisionTrail(ctx: OperationContext, nodeId: string) {
   }
 
   const rootNode = await ctx.nodes.getById(nodeId);
-  if (!rootNode) throw new Error(`节点不存在：${nodeId}`);
+  if (!rootNode) throw new Error(`节点不存在：${echoId(nodeId)}${nodeIdMissHint(nodeId)}`);
 
   await trace(nodeId);
   return { root: rootNode, trail };

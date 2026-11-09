@@ -3,7 +3,8 @@ import type { OperationContext } from './context.js';
 import type { WitemNode } from '../nodes/types.js';
 import type { Edge } from '../edges/types.js';
 import type { EventRecord } from '../events/types.js';
-import { isValidTransition, WITEM_TRANSITIONS } from '../lifecycle/machines.js';
+import { describeTransitionRejection, isValidTransition, WITEM_TRANSITIONS } from '../lifecycle/machines.js';
+import { echoId, nodeIdMissHint } from '../nodes/id.js';
 
 // ============================================================
 // define_witem — 定义工作项（人审的跨会话承诺）
@@ -29,9 +30,8 @@ export async function defineWitem(ctx: OperationContext, input: DefineWitemInput
   return ctx.withTx(async (tx) => {
     if (input.parent_witem) {
       const parent = await tx.nodes.getById(input.parent_witem);
-      if (!parent || parent.type !== 'witem') {
-        throw new Error(`父工作项不存在：${input.parent_witem}`);
-      }
+      if (!parent) throw new Error(`父工作项不存在：${echoId(input.parent_witem)}${nodeIdMissHint(input.parent_witem)}`);
+      if (parent.type !== 'witem') throw new Error(`父工作项类型不符：${echoId(input.parent_witem)} 是 ${parent.type}；需要 witem 类型节点`);
     }
 
     const now = new Date().toISOString();
@@ -100,9 +100,8 @@ export async function decomposeWitem(ctx: OperationContext, input: DecomposeWite
   return ctx.withTx(async (tx) => {
     const now = new Date().toISOString();
     const parent = await tx.nodes.getById(input.witem_id);
-    if (!parent || parent.type !== 'witem') {
-      throw new Error(`工作项不存在：${input.witem_id}`);
-    }
+    if (!parent) throw new Error(`工作项不存在：${echoId(input.witem_id)}${nodeIdMissHint(input.witem_id)}`);
+    if (parent.type !== 'witem') throw new Error(`工作项类型不符：${echoId(input.witem_id)} 是 ${parent.type}；需要 witem 类型节点`);
 
     const sub_witems_created: WitemNode[] = [];
     const edges_created: Edge[] = [];
@@ -153,13 +152,12 @@ export interface UpdateWitemStatusInput {
 export async function updateWitemStatus(ctx: OperationContext, input: UpdateWitemStatusInput) {
   return ctx.withTx(async (tx) => {
     const witem = await tx.nodes.getById(input.witem_id);
-    if (!witem || witem.type !== 'witem') {
-      throw new Error(`工作项不存在：${input.witem_id}`);
-    }
+    if (!witem) throw new Error(`工作项不存在：${echoId(input.witem_id)}${nodeIdMissHint(input.witem_id)}`);
+    if (witem.type !== 'witem') throw new Error(`工作项类型不符：${echoId(input.witem_id)} 是 ${witem.type}；需要 witem 类型节点`);
 
     const oldStatus = witem.status;
-    if (!isValidTransition(WITEM_TRANSITIONS, oldStatus as any, input.new_status)) {
-      throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
+    if (!isValidTransition(WITEM_TRANSITIONS, oldStatus, input.new_status)) {
+      throw new Error(describeTransitionRejection(WITEM_TRANSITIONS, oldStatus, input.new_status));
     }
 
     const updated: WitemNode = {

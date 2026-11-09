@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ulid } from 'ulidx';
-import { toClaimView, toProposalView } from '@sibeaver/core';
+import { describeTransitionRejection, echoId, entityIdMissHint, toClaimView, toProposalView } from '@sibeaver/core';
 import type {
   BomConstraint,
   BomRequirement,
@@ -22,6 +22,7 @@ import type {
   ProposalView,
   ReplanProposalInput,
   ReportInput,
+  TransitionMap,
   Workpack,
   WorkpackList,
   WorkpackView,
@@ -345,7 +346,7 @@ export async function claimWorkpack(
   const now = new Date().toISOString();
   const list = await listWorkpacks(ctx);
   const workpack = list.workpacks.find(item => item.id === workpackId);
-  if (!workpack) throw new WorkpackError('工作包不存在（可能已随差距关闭）', 404);
+  if (!workpack) throw new WorkpackError(`工作包不存在：${echoId(workpackId)}（可能已随差距关闭）`, 404);
 
   const active = await ctx.workpacks.getActiveClaims();
   const existing = active.find(claim => claim.workpack_id === workpackId);
@@ -401,6 +402,23 @@ export async function claimWorkpack(
 }
 
 // @sibom r-ar2b — 租约到期/心跳中断可回收；续租延长有效期
+// 工作包认领与执行者校验（r-mp5e/r-mp6f 自纠：不存在与执行者不符分两态回显）
+async function requireActiveWorkpackClaim(
+  ctx: OperationContext,
+  workpackId: string,
+  executor: string,
+  role = '执行者',
+) {
+  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
+  if (!claim) {
+    throw new WorkpackError(`工作包无有效认领：${echoId(workpackId)}（未被认领或租约已过期）`, 409);
+  }
+  if (claim.executor !== executor) {
+    throw new WorkpackError(`认领${role}不匹配：工作包 ${echoId(workpackId)} 的认领者为 ${claim.executor}，请求者为 ${executor}`, 409);
+  }
+  return claim;
+}
+
 export async function renewWorkpack(
   ctx: OperationContext,
   workpackId: string,
@@ -408,10 +426,7 @@ export async function renewWorkpack(
 ): Promise<ClaimView> {
   const now = new Date().toISOString();
   await ctx.workpacks.expireStale(now);
-  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
-  if (!claim || claim.executor !== input.executor) {
-    throw new WorkpackError('无有效认领或执行者不匹配', 409);
-  }
+  const claim = await requireActiveWorkpackClaim(ctx, workpackId, input.executor);
   const leaseExpiresAt = new Date(Date.now() + leaseSeconds() * 1000).toISOString();
   await ctx.workpacks.updateClaimLease(claim.id, leaseExpiresAt, now);
   return toClaimView({ ...claim, lease_expires_at: leaseExpiresAt, heartbeat_at: now });
@@ -424,10 +439,7 @@ export async function releaseWorkpack(
 ): Promise<{ ok: true }> {
   const now = new Date().toISOString();
   await ctx.workpacks.expireStale(now);
-  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
-  if (!claim || claim.executor !== input.executor) {
-    throw new WorkpackError('无有效认领或执行者不匹配', 409);
-  }
+  const claim = await requireActiveWorkpackClaim(ctx, workpackId, input.executor);
   await ctx.workpacks.closeClaim(claim.id, 'released', now);
   return { ok: true };
 }
@@ -441,10 +453,7 @@ export async function reportWorkpack(
 ): Promise<WorkpackReportResult> {
   const now = new Date().toISOString();
   await ctx.workpacks.expireStale(now);
-  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
-  if (!claim || claim.executor !== input.executor) {
-    throw new WorkpackError('无有效认领或执行者不匹配', 409);
-  }
+  const claim = await requireActiveWorkpackClaim(ctx, workpackId, input.executor);
 
   const writable = claim.manifest.boundary.fact_boundary.writable;
   const outOfScope = input.changed_files.filter(file => !writable.some(scope => scopeContains(scope, file)));
@@ -481,10 +490,7 @@ export async function narrowWorkpackBoundary(
 ): Promise<WorkpackBoundaryResult> {
   const now = new Date().toISOString();
   await ctx.workpacks.expireStale(now);
-  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
-  if (!claim || claim.executor !== input.executor) {
-    throw new WorkpackError('无有效认领或执行者不匹配', 409);
-  }
+  const claim = await requireActiveWorkpackClaim(ctx, workpackId, input.executor);
 
   const current = claim.manifest.boundary.fact_boundary.writable;
   const proposed = [...new Set(input.writable)].sort();
@@ -520,10 +526,7 @@ export async function proposeContractChange(
 ): Promise<ProposalView> {
   const now = new Date().toISOString();
   await ctx.workpacks.expireStale(now);
-  const claim = await ctx.workpacks.getActiveClaimByWorkpack(workpackId);
-  if (!claim || claim.executor !== input.proposer) {
-    throw new WorkpackError('无有效认领或提案者不匹配', 409);
-  }
+  const claim = await requireActiveWorkpackClaim(ctx, workpackId, input.proposer, '提案者');
 
   const responsibility = claim.manifest.requirement_keys;
   const invalid = input.requirement_keys.filter(key => !responsibility.includes(key));
@@ -583,6 +586,9 @@ export async function listProposals(
   return records.map(toProposalView);
 }
 
+// 提案显式确认的状态机（r-mp5e：拒绝回显当前状态与合法目标状态）
+const PROPOSAL_CONFIRM_TRANSITIONS: TransitionMap<ProposalStatus> = { proposed: ['confirmed'] };
+
 // 重规划提案由人显式接受；服务端只记录，不改变派生工作包
 export async function confirmReplanProposal(
   ctx: OperationContext,
@@ -590,12 +596,12 @@ export async function confirmReplanProposal(
   input: ConfirmProposalInput,
 ): Promise<ProposalView> {
   const proposal = await ctx.proposals.getProposal(proposalId);
-  if (!proposal) throw new WorkpackError('提案不存在', 404);
+  if (!proposal) throw new WorkpackError(`提案不存在：${echoId(proposalId)}${entityIdMissHint(proposalId, '提案')}`, 404);
   if (proposal.kind !== 'replan') {
     throw new WorkpackError('契约提案经基线前移确认，不走显式确认', 409);
   }
   if (proposal.status !== 'proposed') {
-    throw new WorkpackError('提案已处理', 409);
+    throw new WorkpackError(describeTransitionRejection(PROPOSAL_CONFIRM_TRANSITIONS, proposal.status, 'confirmed'), 409);
   }
   const now = new Date().toISOString();
   await ctx.proposals.confirmReplan(proposalId, input.confirmed_by, now);

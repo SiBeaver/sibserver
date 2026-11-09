@@ -1,8 +1,9 @@
 import { ulid } from 'ulidx';
 import type { OperationContext } from './context.js';
 import type { Edge } from '../edges/types.js';
-import { validateRelation, type RelationType } from '../edges/types.js';
+import { validateRelation, describeRelationRejection, type RelationType } from '../edges/types.js';
 import type { NodeType } from '../nodes/types.js';
+import { echoId, nodeIdMissHint } from '../nodes/id.js';
 
 // ============================================================
 // link_nodes — 关联节点
@@ -18,15 +19,13 @@ export interface LinkNodesInput {
 export async function linkNodes(ctx: OperationContext, input: LinkNodesInput) {
   return ctx.withTx(async (tx) => {
     const source = await tx.nodes.getById(input.source_id);
-    if (!source) throw new Error(`源节点不存在：${input.source_id}`);
+    if (!source) throw new Error(`源节点不存在：${echoId(input.source_id)}${nodeIdMissHint(input.source_id)}`);
 
     const target = await tx.nodes.getById(input.target_id);
-    if (!target) throw new Error(`目标节点不存在：${input.target_id}`);
+    if (!target) throw new Error(`目标节点不存在：${echoId(input.target_id)}${nodeIdMissHint(input.target_id)}`);
 
     if (!validateRelation(input.relation, source.type as NodeType, target.type as NodeType)) {
-      throw new Error(
-        `无效关系「${input.relation}」：${source.type} → ${target.type}`
-      );
+      throw new Error(describeRelationRejection(input.relation, source.type as NodeType, target.type as NodeType));
     }
 
     const now = new Date().toISOString();
@@ -70,7 +69,7 @@ export interface DeleteNodeInput {
 export async function deleteNode(ctx: OperationContext, input: DeleteNodeInput) {
   return ctx.withTx(async (tx) => {
     const node = await tx.nodes.getById(input.node_id);
-    if (!node) throw new Error(`节点不存在：${input.node_id}`);
+    if (!node) throw new Error(`节点不存在：${echoId(input.node_id)}${nodeIdMissHint(input.node_id)}`);
 
     // 删除所有关联边
     const edges = await tx.edges.getByNode(input.node_id);
@@ -135,7 +134,7 @@ export async function getProjectState(ctx: OperationContext) {
 
 export async function getNodeContext(ctx: OperationContext, nodeId: string, includeEvents = true) {
   const node = await ctx.nodes.getById(nodeId);
-  if (!node) throw new Error(`节点不存在：${nodeId}`);
+  if (!node) throw new Error(`节点不存在：${echoId(nodeId)}${nodeIdMissHint(nodeId)}`);
 
   const edges = await ctx.edges.getByNode(nodeId);
   const neighborIds = new Set<string>();

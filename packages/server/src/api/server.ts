@@ -742,6 +742,12 @@ ${existingSummary || '（暂无）'}
           });
           updated.push(res.knowledge);
         } else if (act.action === 'merge' && act.merge_ids?.length) {
+          // LLM 可能给出不存在/非 knowledge 的 ID：只取代真实知识节点，避免整批 distill 因 invalidates 拒绝而失败
+          const mergeIds: string[] = [];
+          for (const id of act.merge_ids) {
+            const node = await ctx.nodes.getById(id);
+            if (node?.type === 'knowledge') mergeIds.push(id);
+          }
           const res = await recordKnowledge(ctx, {
             title: act.title!,
             description: act.description || '',
@@ -750,7 +756,7 @@ ${existingSummary || '（暂无）'}
             confidence: act.confidence || 'medium',
             source: source || 'distill-merge',
             parent_id: act.parent_id,
-            invalidates: act.merge_ids,
+            invalidates: mergeIds,
             tags: act.tags,
           });
           merged.push(res.knowledge);

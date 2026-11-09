@@ -1,5 +1,6 @@
 // core types & lifecycle
 export * from './nodes/types.js';
+export * from './nodes/id.js';
 export * from './edges/types.js';
 export * from './events/types.js';
 export * from './events/interfaces.js';

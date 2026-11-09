@@ -2,7 +2,8 @@ import { ulid } from 'ulidx';
 import type { OperationContext } from './context.js';
 import type { Edge } from '../edges/types.js';
 import type { RequirementNode, Acceptance, RequirementStatus } from '../nodes/types.js';
-import { isValidTransition, REQUIREMENT_TRANSITIONS } from '../lifecycle/machines.js';
+import { describeTransitionRejection, isValidTransition, REQUIREMENT_TRANSITIONS } from '../lifecycle/machines.js';
+import { echoId, nodeIdMissHint } from '../nodes/id.js';
 
 // ============================================================
 // define_requirement — 定义需求
@@ -24,9 +25,8 @@ export async function defineRequirement(ctx: OperationContext, input: DefineRequ
   return ctx.withTx(async (tx) => {
     if (input.parent_witem) {
       const witem = await tx.nodes.getById(input.parent_witem);
-      if (!witem || witem.type !== 'witem') {
-        throw new Error(`父工作项不存在：${input.parent_witem}`);
-      }
+      if (!witem) throw new Error(`父工作项不存在：${echoId(input.parent_witem)}${nodeIdMissHint(input.parent_witem)}`);
+      if (witem.type !== 'witem') throw new Error(`父工作项类型不符：${echoId(input.parent_witem)} 是 ${witem.type}；需要 witem 类型节点`);
     }
 
     const now = new Date().toISOString();
@@ -84,9 +84,8 @@ export interface UpdateRequirementStatusInput {
 export async function updateRequirementStatus(ctx: OperationContext, input: UpdateRequirementStatusInput) {
   return ctx.withTx(async (tx) => {
     const node = await tx.nodes.getById(input.requirement_id);
-    if (!node || node.type !== 'requirement') {
-      throw new Error(`需求不存在：${input.requirement_id}`);
-    }
+    if (!node) throw new Error(`需求不存在：${echoId(input.requirement_id)}${nodeIdMissHint(input.requirement_id)}`);
+    if (node.type !== 'requirement') throw new Error(`需求类型不符：${echoId(input.requirement_id)} 是 ${node.type}；需要 requirement 类型节点`);
 
     const requirement = node as RequirementNode;
     const oldStatus = requirement.status;
@@ -94,11 +93,11 @@ export async function updateRequirementStatus(ctx: OperationContext, input: Upda
     if (input.new_status === 'deprecated') {
       // 任意状态可废弃（含 satisfied——满足但键已移出 BOM 的旧节点清理路径）；仅防重复废弃
       if (oldStatus === 'deprecated') {
-        throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
+        throw new Error(describeTransitionRejection(REQUIREMENT_TRANSITIONS, oldStatus, input.new_status));
       }
     } else {
       if (!isValidTransition(REQUIREMENT_TRANSITIONS, oldStatus, input.new_status)) {
-        throw new Error(`无效状态迁移：${oldStatus} → ${input.new_status}`);
+        throw new Error(describeTransitionRejection(REQUIREMENT_TRANSITIONS, oldStatus, input.new_status));
       }
     }
 
@@ -143,9 +142,8 @@ export interface UpdateRequirementAcceptanceInput {
 export async function updateRequirementAcceptance(ctx: OperationContext, input: UpdateRequirementAcceptanceInput) {
   return ctx.withTx(async (tx) => {
     const node = await tx.nodes.getById(input.requirement_id);
-    if (!node || node.type !== 'requirement') {
-      throw new Error(`需求不存在：${input.requirement_id}`);
-    }
+    if (!node) throw new Error(`需求不存在：${echoId(input.requirement_id)}${nodeIdMissHint(input.requirement_id)}`);
+    if (node.type !== 'requirement') throw new Error(`需求类型不符：${echoId(input.requirement_id)} 是 ${node.type}；需要 requirement 类型节点`);
 
     const requirement = node as RequirementNode;
     const oldAcceptance = requirement.acceptance;

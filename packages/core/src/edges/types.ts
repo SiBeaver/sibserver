@@ -119,3 +119,20 @@ export function validateRelation(
     constraint.target.includes(targetType)
   );
 }
+
+/** 关系允许的源/目标节点类型集合（单点真值，供拒绝文案复用） */
+export function describeRelationTypes(relation: RelationType): string {
+  const { source, target } = RELATION_CONSTRAINTS[relation];
+  const list = (types: NodeType[]): string => (types.length > 0 ? types.join(', ') : '（无）');
+  return `允许的源类型：[${list(source)}]，允许的目标类型：[${list(target)}]`;
+}
+
+/** 关系拒绝的自纠判据（r-mp5e）：回显该关系允许的源/目标节点类型集合 */
+// @sibom r-mp5e — 关系拒绝回显该关系允许的源/目标类型集合
+export function describeRelationRejection(
+  relation: RelationType,
+  sourceType: NodeType,
+  targetType: NodeType,
+): string {
+  return `无效关系「${relation}」：${sourceType} → ${targetType}；${describeRelationTypes(relation)}`;
+}

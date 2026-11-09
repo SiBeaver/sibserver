@@ -2,8 +2,9 @@ import { ulid } from 'ulidx';
 import type { OperationContext } from './context.js';
 import type { Edge } from '../edges/types.js';
 import type { KnowledgeNode } from '../nodes/types.js';
-import { validateRelation } from '../edges/types.js';
+import { validateRelation, describeRelationTypes } from '../edges/types.js';
 import type { NodeType } from '../nodes/types.js';
+import { echoId, nodeIdMissHint } from '../nodes/id.js';
 
 // ============================================================
 // record_knowledge — 记录知识
@@ -55,7 +56,10 @@ export async function recordKnowledge(ctx: OperationContext, input: RecordKnowle
     for (const fromId of input.derived_from ?? []) {
       const from = await tx.nodes.getById(fromId);
       if (!from || !validateRelation('derived_from', from.type as NodeType, 'knowledge')) {
-        throw new Error(`来源节点不存在或类型不符：${fromId}`);
+        const detail = from
+          ? `（实际类型 ${from.type}；${describeRelationTypes('derived_from')}）`
+          : nodeIdMissHint(fromId);
+        throw new Error(`来源节点不存在或类型不符：${echoId(fromId)}${detail}`);
       }
       const edge: Edge = {
         id: ulid(), source_id: fromId, target_id: knowledge.id,
@@ -67,18 +71,20 @@ export async function recordKnowledge(ctx: OperationContext, input: RecordKnowle
 
     for (const oldId of input.invalidates ?? []) {
       const oldNode = await tx.nodes.getById(oldId);
-      if (oldNode && oldNode.type === 'knowledge') {
-        const updated = { ...oldNode as KnowledgeNode, status: 'outdated' as const, updated_at: now };
-        await tx.nodes.update(updated);
-        invalidated_nodes.push(updated);
-
-        const edge: Edge = {
-          id: ulid(), source_id: knowledge.id, target_id: oldId,
-          relation: 'supersedes', weight: null, annotation: null, created_at: now,
-        };
-        await tx.edges.insert(edge);
-        edges_created.push(edge);
+      if (!oldNode) throw new Error(`被取代知识不存在：${echoId(oldId)}${nodeIdMissHint(oldId)}`);
+      if (oldNode.type !== 'knowledge') {
+        throw new Error(`被取代知识类型不符：${echoId(oldId)} 是 ${oldNode.type}；invalidates 只接受 knowledge 类型节点`);
       }
+      const updated = { ...oldNode as KnowledgeNode, status: 'outdated' as const, updated_at: now };
+      await tx.nodes.update(updated);
+      invalidated_nodes.push(updated);
+
+      const edge: Edge = {
+        id: ulid(), source_id: knowledge.id, target_id: oldId,
+        relation: 'supersedes', weight: null, annotation: null, created_at: now,
+      };
+      await tx.edges.insert(edge);
+      edges_created.push(edge);
     }
 
     const event = await tx.events.emit({
@@ -113,9 +119,8 @@ export interface UpdateKnowledgeInput {
 export async function updateKnowledge(ctx: OperationContext, input: UpdateKnowledgeInput) {
   return ctx.withTx(async (tx) => {
     const node = await tx.nodes.getById(input.knowledge_id);
-    if (!node || node.type !== 'knowledge') {
-      throw new Error(`知识节点不存在：${input.knowledge_id}`);
-    }
+    if (!node) throw new Error(`知识节点不存在：${echoId(input.knowledge_id)}${nodeIdMissHint(input.knowledge_id)}`);
+    if (node.type !== 'knowledge') throw new Error(`知识节点类型不符：${echoId(input.knowledge_id)} 是 ${node.type}；需要 knowledge 类型节点`);
 
     const now = new Date().toISOString();
     const updated: KnowledgeNode = {
@@ -208,14 +213,16 @@ export async function getKnowledgeTree(ctx: OperationContext) {
 
 export async function pinKnowledge(ctx: OperationContext, input: { knowledge_id: string; pinned: boolean }) {
   const node = await ctx.nodes.getById(input.knowledge_id);
-  if (!node || node.type !== 'knowledge') throw new Error('知识节点不存在');
+  if (!node) throw new Error(`知识节点不存在：${echoId(input.knowledge_id)}${nodeIdMissHint(input.knowledge_id)}`);
+  if (node.type !== 'knowledge') throw new Error(`知识节点类型不符：${echoId(input.knowledge_id)} 是 ${node.type}；需要 knowledge 类型节点`);
   await ctx.nodes.updatePinned(input.knowledge_id, input.pinned);
   return { id: input.knowledge_id, pinned: input.pinned };
 }
 
 export async function moveKnowledge(ctx: OperationContext, input: { knowledge_id: string; parent_id: string | null; sort_order?: number }) {
   const node = await ctx.nodes.getById(input.knowledge_id);
-  if (!node || node.type !== 'knowledge') throw new Error('知识节点不存在');
+  if (!node) throw new Error(`知识节点不存在：${echoId(input.knowledge_id)}${nodeIdMissHint(input.knowledge_id)}`);
+  if (node.type !== 'knowledge') throw new Error(`知识节点类型不符：${echoId(input.knowledge_id)} 是 ${node.type}；需要 knowledge 类型节点`);
   if ((node as KnowledgeNode).pinned && input.parent_id !== (node as any).parent_id) {
     throw new Error('不能移动已固定的知识节点，请先取消固定');
   }

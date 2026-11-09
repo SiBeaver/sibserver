@@ -1,5 +1,5 @@
 import { ulid } from 'ulidx';
-import { DOMAIN_FACT_TYPES, PROPOSAL_ONLY_FACT_TYPES, toProposalView } from '@sibeaver/core';
+import { DOMAIN_FACT_TYPES, PROPOSAL_ONLY_FACT_TYPES, echoId, entityIdMissHint, toProposalView } from '@sibeaver/core';
 import type {
   BoundaryDeclaration,
   ClaimCreateInput,
@@ -70,6 +70,23 @@ function scopeContains(outer: string, inner: string): boolean {
   if (b.startsWith(`${a}/`)) return true;
   const prefix = scopePrefix(a);
   return prefix !== '' && (b === prefix || b.startsWith(`${prefix}/`));
+}
+
+/** 取活跃认领并校验执行者：不存在/失效与执行者不符分别回显（r-mp5e/r-mp6f 自纠） */
+async function requireActiveClaim(
+  ctx: OperationContext,
+  id: string,
+  executor: string,
+  role = '执行者',
+): Promise<ResponsibilityClaimRecord> {
+  const claim = await ctx.claims.getActiveClaim(id);
+  if (!claim) {
+    throw new ClaimError(`认领不存在或已失效：${echoId(id)}${entityIdMissHint(id, '认领')}`, 409);
+  }
+  if (claim.executor !== executor) {
+    throw new ClaimError(`认领${role}不匹配：${echoId(id)} 的执行者为 ${claim.executor}，请求者为 ${executor}`, 409);
+  }
+  return claim;
 }
 
 function matchFact(claim: ResponsibilityClaimRecord, factType: FactType | undefined, path: string): FactType | null {
@@ -157,7 +174,7 @@ export async function listClaims(
 export async function getClaim(ctx: OperationContext, id: string): Promise<ResponsibilityClaimRecord> {
   await ctx.claims.expireStale(new Date().toISOString());
   const claim = await ctx.claims.getClaim(id);
-  if (!claim) throw new ClaimError('认领不存在', 404);
+  if (!claim) throw new ClaimError(`认领不存在：${echoId(id)}${entityIdMissHint(id, '认领')}`, 404);
   return claim;
 }
 
@@ -169,10 +186,7 @@ export async function renewClaim(
 ): Promise<ResponsibilityClaimRecord> {
   const now = new Date().toISOString();
   await ctx.claims.expireStale(now);
-  const claim = await ctx.claims.getActiveClaim(id);
-  if (!claim || claim.executor !== input.executor) {
-    throw new ClaimError('无有效认领或执行者不匹配', 409);
-  }
+  const claim = await requireActiveClaim(ctx, id, input.executor);
   const leaseExpiresAt = new Date(Date.now() + leaseSeconds() * 1000).toISOString();
   await ctx.claims.updateLease(id, leaseExpiresAt, now);
   return { ...claim, lease_expires_at: leaseExpiresAt, heartbeat_at: now };
@@ -185,10 +199,7 @@ export async function releaseClaim(
 ): Promise<ResponsibilityClaimRecord> {
   const now = new Date().toISOString();
   await ctx.claims.expireStale(now);
-  const claim = await ctx.claims.getActiveClaim(id);
-  if (!claim || claim.executor !== input.executor) {
-    throw new ClaimError('无有效认领或执行者不匹配', 409);
-  }
+  const claim = await requireActiveClaim(ctx, id, input.executor);
   await ctx.claims.closeClaim(id, 'released', now);
   return { ...claim, status: 'released', released_at: now };
 }
@@ -202,7 +213,9 @@ export async function revokeClaim(
   const now = new Date().toISOString();
   await ctx.claims.expireStale(now);
   const claim = await ctx.claims.getActiveClaim(id);
-  if (!claim) throw new ClaimError('无有效认领', 409);
+  if (!claim) {
+    throw new ClaimError(`认领不存在或已失效：${echoId(id)}${entityIdMissHint(id, '认领')}`, 409);
+  }
   const reason = `${input.revoked_by}: ${input.reason}`;
   await ctx.claims.closeClaim(id, 'revoked', now, reason);
   return { ...claim, status: 'revoked', released_at: now, revoked_reason: reason };
@@ -218,10 +231,7 @@ export async function reportClaim(
 ): Promise<ClaimReportResult> {
   const now = new Date().toISOString();
   await ctx.claims.expireStale(now);
-  const claim = await ctx.claims.getActiveClaim(id);
-  if (!claim || claim.executor !== input.executor) {
-    throw new ClaimError('无有效认领或执行者不匹配', 409);
-  }
+  const claim = await requireActiveClaim(ctx, id, input.executor);
 
   const outOfScope: string[] = [];
   const proposalOnly: string[] = [];
@@ -274,10 +284,7 @@ export async function narrowClaimBoundary(
 ): Promise<ResponsibilityClaimRecord> {
   const now = new Date().toISOString();
   await ctx.claims.expireStale(now);
-  const claim = await ctx.claims.getActiveClaim(id);
-  if (!claim || claim.executor !== input.executor) {
-    throw new ClaimError('无有效认领或执行者不匹配', 409);
-  }
+  const claim = await requireActiveClaim(ctx, id, input.executor);
   validateBoundary(claim.domain, input.boundary);
 
   const widened = input.boundary.fact_types
@@ -313,10 +320,7 @@ export async function proposeClaimContractChange(
 ): Promise<ProposalView> {
   const now = new Date().toISOString();
   await ctx.claims.expireStale(now);
-  const claim = await ctx.claims.getActiveClaim(id);
-  if (!claim || claim.executor !== input.proposer) {
-    throw new ClaimError('无有效认领或提案者不匹配', 409);
-  }
+  const claim = await requireActiveClaim(ctx, id, input.proposer, '提案者');
   const invalid = input.requirement_keys.filter(key => !claim.requirement_keys.includes(key));
   if (invalid.length > 0) {
     throw new ClaimError(`提案需求键不在认领责任范围：${invalid.join(', ')}`, 409);

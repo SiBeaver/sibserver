@@ -4,7 +4,7 @@ import type { WitemStatus, DecisionStatus, RiskStatus, TechDebtStatus, Knowledge
 // 生命周期状态转换规则
 // ============================================================
 
-type TransitionMap<S extends string> = Partial<Record<S, S[]>>;
+export type TransitionMap<S extends string> = Partial<Record<S, S[]>>;
 
 export const WITEM_TRANSITIONS: TransitionMap<WitemStatus> = {
   active: ['achieved', 'abandoned', 'deferred'],
@@ -54,4 +54,15 @@ export function isValidTransition<S extends string>(
   const allowed = transitions[from];
   if (!allowed) return false;
   return allowed.includes(to);
+}
+
+/** 状态迁移拒绝的自纠判据（r-mp5e）：回显当前状态与全部合法目标状态 */
+// @sibom r-mp5e — 状态迁移拒绝回显当前状态与全部合法目标状态
+export function describeTransitionRejection<S extends string>(
+  transitions: TransitionMap<S>,
+  from: S,
+  to: S,
+): string {
+  const allowed = transitions[from] ?? [];
+  return `无效状态迁移：${from} → ${to}；当前状态 ${from}，合法目标状态：[${allowed.length > 0 ? allowed.join(', ') : '（无）'}]`;
 }
