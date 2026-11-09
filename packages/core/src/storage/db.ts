@@ -339,6 +339,21 @@ CREATE TABLE IF NOT EXISTS executor_profiles (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (project_id, executor)
 );
+
+-- 工作流模板引用（r-ea2b：sibeaver 只持有引用与校验，不执行 workflow）
+CREATE TABLE IF NOT EXISTS workflow_templates (
+  project_id TEXT NOT NULL REFERENCES projects(slug),
+  id TEXT NOT NULL,
+  harness TEXT NOT NULL,
+  format TEXT NOT NULL,
+  path TEXT NOT NULL,
+  commit TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  contract JSONB NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, id)
+);
 ` + JSONB_NORMALIZE_SQL;
 
 let _poolPromise: Promise<postgres.Sql> | null = null;

@@ -5,6 +5,7 @@ import { WorkpackStore } from '../storage/workpack-store.js';
 import { ClaimStore } from '../storage/claim-store.js';
 import { ProposalStore } from '../storage/proposal-store.js';
 import { ExecutorStore } from '../storage/executor-store.js';
+import { WorkflowTemplateStore } from '../storage/workflow-template-store.js';
 import { EventEmitter } from '../events/emitter.js';
 
 // ============================================================
@@ -21,6 +22,7 @@ export class OperationContext {
   readonly claims: ClaimStore;
   readonly proposals: ProposalStore;
   readonly executors: ExecutorStore;
+  readonly workflowTemplates: WorkflowTemplateStore;
   private readonly sql: Sql;
   private readonly projectId: string;
 
@@ -36,6 +38,7 @@ export class OperationContext {
     this.claims = new ClaimStore(sql, projectId);
     this.proposals = new ProposalStore(sql, projectId);
     this.executors = new ExecutorStore(sql, projectId);
+    this.workflowTemplates = new WorkflowTemplateStore(sql, projectId);
   }
 
   /** 在单个数据库事务内执行操作；任一步失败整体回滚，不留孤儿行/部分状态 */

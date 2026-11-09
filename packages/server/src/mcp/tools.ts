@@ -33,6 +33,10 @@ import {
   releaseWorkpack, renewWorkpack, reportWorkpack,
 } from '../workpack/engine.js';
 import { listExecutors, registerExecutor } from '../executor/engine.js';
+import { WorkflowContract } from '@sibeaver/core';
+import {
+  checkWorkflowTemplateGates, getWorkflowTemplate, listWorkflowTemplates, registerWorkflowTemplate,
+} from '../workflow/engine.js';
 import {
   createClaim, getClaim, listClaims, narrowClaimBoundary,
   proposeClaimContractChange, releaseClaim, renewClaim, reportClaim, revokeClaim,
@@ -799,6 +803,39 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await listExecutors(getCtx()));
   }));
 
+  server.tool('register_workflow_template', '登记工作流模板引用并校验 contract 五类项；只持有引用，不执行 workflow', {
+    id: z.string().describe('模板 ID'),
+    harness: z.string().describe('harness 名称（如 qoder-cli）'),
+    format: z.string().describe('原生格式（如 qoder-workflow / yaml）'),
+    path: z.string().describe('模板路径'),
+    commit: z.string().describe('模板所在提交'),
+    sha256: z.string().describe('模板内容 sha256（防漂移）'),
+    contract: WorkflowContract.describe('工位/检查/门禁/证据引用/执行者类型'),
+  }, log('register_workflow_template', async (args) => {
+    return jsonResult(await registerWorkflowTemplate(getCtx(), args));
+  }));
+
+  server.tool('list_workflow_templates', '列出工作流模板引用（只读）', {
+  }, log('list_workflow_templates', async () => {
+    return jsonResult(await listWorkflowTemplates(getCtx()));
+  }));
+
+  server.tool('get_workflow_template', '读取单个工作流模板引用', {
+    id: z.string().describe('模板 ID'),
+  }, log('get_workflow_template', async (args) => {
+    const template = await getWorkflowTemplate(getCtx(), args.id);
+    if (!template) throw new Error(`工作流模板不存在：${args.id}`);
+    return jsonResult(template);
+  }));
+
+  server.tool('check_workflow_template_gates', '核对模板必需门禁的证据是否已上报（只核对存在）', {
+    id: z.string().describe('模板 ID'),
+  }, log('check_workflow_template_gates', async (args) => {
+    const result = await checkWorkflowTemplateGates(getCtx(), args.id);
+    if (!result) throw new Error(`工作流模板不存在：${args.id}`);
+    return jsonResult(result);
+  }));
+
   // --- 风险与技术债 ---
   server.tool('identify_risk', '识别一个项目风险', {
     title: z.string().describe('风险标题'),
@@ -1416,6 +1453,43 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     project: projectParam,
   }, log('list_executors', async ({ project }) => {
     return jsonResult(await listExecutors(await ctx(project)));
+  }));
+
+  server.tool('register_workflow_template', '登记工作流模板引用并校验 contract 五类项；只持有引用，不执行 workflow', {
+    project: projectParam,
+    id: z.string().describe('模板 ID'),
+    harness: z.string().describe('harness 名称'),
+    format: z.string().describe('原生格式'),
+    path: z.string().describe('模板路径'),
+    commit: z.string().describe('模板所在提交'),
+    sha256: z.string().describe('模板内容 sha256（防漂移）'),
+    contract: WorkflowContract.describe('工位/检查/门禁/证据引用/执行者类型'),
+  }, log('register_workflow_template', async ({ project, ...args }) => {
+    return jsonResult(await registerWorkflowTemplate(await ctx(project), args));
+  }));
+
+  server.tool('list_workflow_templates', '列出工作流模板引用（只读）', {
+    project: projectParam,
+  }, log('list_workflow_templates', async ({ project }) => {
+    return jsonResult(await listWorkflowTemplates(await ctx(project)));
+  }));
+
+  server.tool('get_workflow_template', '读取单个工作流模板引用', {
+    project: projectParam,
+    id: z.string().describe('模板 ID'),
+  }, log('get_workflow_template', async ({ project, id }) => {
+    const template = await getWorkflowTemplate(await ctx(project), id);
+    if (!template) throw new Error(`工作流模板不存在：${id}`);
+    return jsonResult(template);
+  }));
+
+  server.tool('check_workflow_template_gates', '核对模板必需门禁的证据是否已上报（只核对存在）', {
+    project: projectParam,
+    id: z.string().describe('模板 ID'),
+  }, log('check_workflow_template_gates', async ({ project, id }) => {
+    const result = await checkWorkflowTemplateGates(await ctx(project), id);
+    if (!result) throw new Error(`工作流模板不存在：${id}`);
+    return jsonResult(result);
   }));
 
   // --- 风险与技术债 ---

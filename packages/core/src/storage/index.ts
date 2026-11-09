@@ -5,3 +5,4 @@ export { WorkpackStore, toClaimView, type ClaimRecord } from './workpack-store.j
 export { ClaimStore, type ResponsibilityClaimRecord } from './claim-store.js';
 export { ProposalStore, toProposalView, type ProposalRecord } from './proposal-store.js';
 export { ExecutorStore } from './executor-store.js';
+export { WorkflowTemplateStore } from './workflow-template-store.js';

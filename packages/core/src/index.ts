@@ -16,4 +16,5 @@ export * from './gap/types.js';
 export * from './workpack/types.js';
 export * from './claims/types.js';
 export * from './executor/types.js';
+export * from './workflow/types.js';
 export * from './constraints/types.js';

@@ -32,6 +32,9 @@ import {
 } from '../workpack/engine.js';
 import { listExecutors, registerExecutor } from '../executor/engine.js';
 import {
+  checkWorkflowTemplateGates, getWorkflowTemplate, listWorkflowTemplates, registerWorkflowTemplate,
+} from '../workflow/engine.js';
+import {
   ClaimError, createClaim, getClaim, listClaims, narrowClaimBoundary,
   proposeClaimContractChange, releaseClaim, renewClaim, reportClaim, revokeClaim,
 } from '../claims/engine.js';
@@ -40,7 +43,7 @@ import {
   ClaimRenewInput, ClaimReportInput, ClaimRevokeInput, ClaimStatus,
   ConfirmProposalInput, ConstraintSetInput, ContractProposalInput,
   EvidenceReportInput, ExecutorInput, ExecutorProfileInput, NarrowBoundaryInput,
-  ProposalStatus, ReplanProposalInput, ReportInput, WaiverInput,
+  ProposalStatus, ReplanProposalInput, ReportInput, WaiverInput, WorkflowTemplateInput,
 } from '@sibeaver/core';
 
 // ============================================================
@@ -389,6 +392,34 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
     const parsed = ExecutorProfileInput.safeParse(camelToSnake(await c.req.json()));
     if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
     return json(c, await registerExecutor(getCtx(slug), parsed.data));
+  });
+
+  // 工作流模板：只登记引用 + 校验 contract 与门禁证据，不执行 workflow（r-ea2b）
+  app.get('/:project/api/v1/workflow-templates', async (c) => {
+    return json(c, await listWorkflowTemplates(getCtx(c.req.param('project'))));
+  });
+
+  app.post('/:project/api/v1/workflow-templates', async (c) => {
+    const slug = c.req.param('project');
+    const parsed = WorkflowTemplateInput.safeParse(camelToSnake(await c.req.json()));
+    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
+    try {
+      return json(c, await registerWorkflowTemplate(getCtx(slug), parsed.data), 201);
+    } catch (e: any) {
+      return json(c, { error: e.message }, 400);
+    }
+  });
+
+  app.get('/:project/api/v1/workflow-templates/:id', async (c) => {
+    const template = await getWorkflowTemplate(getCtx(c.req.param('project')), c.req.param('id'));
+    if (!template) return json(c, { error: '工作流模板不存在' }, 404);
+    return json(c, template);
+  });
+
+  app.get('/:project/api/v1/workflow-templates/:id/gates', async (c) => {
+    const result = await checkWorkflowTemplateGates(getCtx(c.req.param('project')), c.req.param('id'));
+    if (!result) return json(c, { error: '工作流模板不存在' }, 404);
+    return json(c, result);
   });
 
   app.post('/:project/api/v1/workpacks/:id/claim', async (c) => {
