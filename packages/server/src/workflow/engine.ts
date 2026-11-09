@@ -18,6 +18,7 @@ export interface WorkflowTemplateRegistration extends WorkflowTemplateView {
   changed: boolean;
 }
 
+// @sibom r-wt1a — 登记模板引用并返回 changed（sha256 是否相对上次登记变化）
 // @sibom r-ea2b — sibeaver 持有模板引用、校验五类声明，不执行 workflow
 export async function registerWorkflowTemplate(
   ctx: OperationContext,
@@ -61,6 +62,7 @@ export interface WorkflowGateCheckResult {
 }
 
 /** 门禁证据核对：必需门禁引用的证据源必须在账本中已上报（只核对存在，不解释语义） */
+// @sibom r-wt3c — 必需门禁证据须已上报；只核对存在（evidencePresent），引用缺失按不通过
 // @sibom r-ea2b — 校验模板门禁证据：只核对必需门禁的证据是否已上报
 export async function checkWorkflowTemplateGates(
   ctx: OperationContext,

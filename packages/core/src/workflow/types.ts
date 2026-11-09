@@ -75,7 +75,8 @@ function uniqueIds(label: string, ids: string[]): void {
 }
 
 /** 校验五类项内部唯一性与交叉引用；错误回显可用 ID（可自纠） */
-// @sibom r-ea2b — 模板 manifest 必含五类项；项内 ID 唯一且检查/门禁引用必须存在，缺项即拒绝
+// @sibom r-wt2b — contract 必含五类声明，项内 ID 唯一、检查/门禁引用必须存在，至少一个必需门禁
+// @sibom r-ea2b — 模板 manifest 必含五类项；缺项即拒绝
 export function validateWorkflowContract(contract: WorkflowContract): void {
   uniqueIds('工位', contract.workstations.map(w => w.id));
   uniqueIds('检查', contract.checks.map(c => c.id));
