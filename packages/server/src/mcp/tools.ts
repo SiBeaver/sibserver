@@ -745,13 +745,10 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
       path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
       commit: z.string().min(1).describe('承载变更的 git 提交'),
     })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
+    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
   }, log('propose_claim_contract_change', async (args) => {
-    return jsonResult(await proposeClaimContractChange(getCtx(), args.claim_id, {
-      proposer: args.proposer,
-      summary: args.summary,
-      requirement_keys: args.requirement_keys,
-      refs: args.refs,
-    }));
+    const { claim_id, ...input } = args;
+    return jsonResult(await proposeClaimContractChange(getCtx(), claim_id, input));
   }));
 
   server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道', {
@@ -764,22 +761,14 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
       path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
       commit: z.string().min(1).describe('承载变更的 git 提交'),
     })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
+    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
   }, log('propose_contract_change', async (args) => {
-    if (args.claim_id) {
-      return jsonResult(await proposeClaimContractChange(getCtx(), args.claim_id, {
-        proposer: args.proposer,
-        summary: args.summary,
-        requirement_keys: args.requirement_keys,
-        refs: args.refs,
-      }));
+    const { claim_id, workpack_id, ...input } = args;
+    if (claim_id) {
+      return jsonResult(await proposeClaimContractChange(getCtx(), claim_id, input));
     }
-    if (!args.workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
-    return jsonResult(await proposeContractChange(getCtx(), args.workpack_id, {
-      proposer: args.proposer,
-      summary: args.summary,
-      requirement_keys: args.requirement_keys,
-      refs: args.refs,
-    }));
+    if (!workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
+    return jsonResult(await proposeContractChange(getCtx(), workpack_id, input));
   }));
 
   server.tool('propose_replan', '提交重规划提案；只提案，服务端不应用、不改已确认契约', {
@@ -789,8 +778,9 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
       path: z.string().min(1).describe('规划依据文件路径'),
       commit: z.string().min(1).describe('承载依据的 git 提交'),
     })).optional().describe('BOM/git 引用；提案正文不入控制面'),
+    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
   }, log('propose_replan', async (args) => {
-    return jsonResult(await proposeReplan(getCtx(), { proposer: args.proposer, summary: args.summary, refs: args.refs }));
+    return jsonResult(await proposeReplan(getCtx(), args));
   }));
 
   server.tool('list_contract_proposals', '列出契约变更/重规划提案', {
@@ -1413,13 +1403,10 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
       path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
       commit: z.string().min(1).describe('承载变更的 git 提交'),
     })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
+    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
   }, log('propose_claim_contract_change', async ({ project, ...args }) => {
-    return jsonResult(await proposeClaimContractChange(await ctx(project), args.claim_id, {
-      proposer: args.proposer,
-      summary: args.summary,
-      requirement_keys: args.requirement_keys,
-      refs: args.refs,
-    }));
+    const { claim_id, ...input } = args;
+    return jsonResult(await proposeClaimContractChange(await ctx(project), claim_id, input));
   }));
 
   server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道', {
@@ -1433,22 +1420,14 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
       path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
       commit: z.string().min(1).describe('承载变更的 git 提交'),
     })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
+    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
   }, log('propose_contract_change', async ({ project, ...args }) => {
-    if (args.claim_id) {
-      return jsonResult(await proposeClaimContractChange(await ctx(project), args.claim_id, {
-        proposer: args.proposer,
-        summary: args.summary,
-        requirement_keys: args.requirement_keys,
-        refs: args.refs,
-      }));
+    const { claim_id, workpack_id, ...input } = args;
+    if (claim_id) {
+      return jsonResult(await proposeClaimContractChange(await ctx(project), claim_id, input));
     }
-    if (!args.workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
-    return jsonResult(await proposeContractChange(await ctx(project), args.workpack_id, {
-      proposer: args.proposer,
-      summary: args.summary,
-      requirement_keys: args.requirement_keys,
-      refs: args.refs,
-    }));
+    if (!workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
+    return jsonResult(await proposeContractChange(await ctx(project), workpack_id, input));
   }));
 
   server.tool('propose_replan', '提交重规划提案；只提案，服务端不应用、不改已确认契约', {
@@ -1459,8 +1438,9 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
       path: z.string().min(1).describe('规划依据文件路径'),
       commit: z.string().min(1).describe('承载依据的 git 提交'),
     })).optional().describe('BOM/git 引用；提案正文不入控制面'),
+    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
   }, log('propose_replan', async ({ project, ...args }) => {
-    return jsonResult(await proposeReplan(await ctx(project), { proposer: args.proposer, summary: args.summary, refs: args.refs }));
+    return jsonResult(await proposeReplan(await ctx(project), args));
   }));
 
   server.tool('list_contract_proposals', '列出契约变更/重规划提案', {

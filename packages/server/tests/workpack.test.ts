@@ -417,12 +417,18 @@ describe('工作包提案与重规划', () => {
 
   it('契约提案拒绝正文：只接受引用（strict）', async () => {
     const a = await claimA();
-    const legacy = {
+    const base = {
       proposer: 'e1', summary: '夹带正文', requirement_keys: ['dom/a'],
       refs: [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }],
-      detail: { heavy: 'x'.repeat(64) },
-    } as unknown as Parameters<typeof proposeContractChange>[2];
+    };
+    const legacy = { ...base, detail: { heavy: 'x'.repeat(64) } } as unknown as Parameters<typeof proposeContractChange>[2];
     await expect(proposeContractChange(ctx, a.id, legacy)).rejects.toThrow(/Unrecognized key/);
+
+    const tooLong = { ...base, summary: 'x'.repeat(2001) };
+    await expect(proposeContractChange(ctx, a.id, tooLong)).rejects.toThrow();
+
+    const noRefs = { ...base, refs: [] };
+    await expect(proposeContractChange(ctx, a.id, noRefs)).rejects.toThrow();
   });
 
   it('重规划只提案，服务端不应用；人显式接受只记录', async () => {
@@ -435,6 +441,10 @@ describe('工作包提案与重规划', () => {
     });
     expect(replan.kind).toBe('replan');
     expect(replan.status).toBe('proposed');
+    expect(replan.refs).toEqual(refs);
+
+    const bare = await proposeReplan(ctx, { proposer: 'planner', summary: '无引用重规划' });
+    expect(bare.refs).toEqual([]);
 
     const after = await listWorkpacks(ctx);
     expect(after.workpacks.map(wp => [wp.requirement_keys, wp.parallel_group]))
