@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-// @bom 组织层/执行器适配
 // 工作流模板（r-ea2b）
 //
 // 原生工作流文件（Qoder workflow 脚本 / YAML）是执行权威；contract 块只承载

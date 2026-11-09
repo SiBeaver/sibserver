@@ -1,4 +1,3 @@
-// @bom 认知访问层/MCP协议服务 — 按 slug 隔离项目上下文
 import { getPool, type Sql, OperationContext } from '../index.js';
 import { Registry } from './registry.js';
 import type { ProjectMeta, CreateProjectInput, UpdateProjectInput } from './types.js';

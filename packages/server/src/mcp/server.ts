@@ -1,4 +1,3 @@
-// @bom 认知访问层/MCP协议服务 — stdio MCP server（全局模式）
 /**
  * MCP Server with stdio transport (for local CLI usage).
  * Exposes all tools with an optional project param (global mode).

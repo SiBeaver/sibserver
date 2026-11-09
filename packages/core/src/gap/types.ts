@@ -98,7 +98,7 @@ export interface GapRowRecord {
   detail: string;
   severity: string;
   source_ref: string;
-  /** 身份三元组之证据源——constraint:{id} / sibom-tags:{ruleId} / @bom:{key} / @sibom:{ruleId} / node:{id} / witem:{id} */
+  /** 身份三元组之证据源——constraint:{id} / sibom-tags:{ruleId} / @sibom:{ruleId} / node:{id} / witem:{id} */
   evidence_source: string;
   bom_commit: string;
   /** 判定该行所用的约束集版本；无约束判定时为 null */
@@ -116,7 +116,6 @@ export interface GapRowRecord {
 // ── 证据（上报的资产）────────────────────────────────────────
 // source_id 约定：
 //   constraint:{constraintId}          → { matched, total } 或 { value }
-//   bom-tags                           → { tags: [{ key, file }] }（@bom 需求键认领）
 //   sibom-tags                         → { rules: [{ id, file }] }（@sibom 规则认领）
 
 export const EvidenceItemInput = z.object({
@@ -184,7 +183,7 @@ export interface GapView extends GapRowRecord {
 
 export interface EvidenceScene {
   requirement_key: string;
-  files: Array<{ path: string; bom_tag: string | null }>;
+  files: Array<{ path: string; sibom_tag: string | null }>;
   runs: Array<{ label: string; result: 'pass' | 'fail'; reported_at: string }>;
   sibs_nodes: Array<{ id: string; type: string; title: string }>;
 }

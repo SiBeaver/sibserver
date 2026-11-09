@@ -1,4 +1,3 @@
-// @bom 认知访问层/MCP协议服务 — Streamable HTTP 传输与 /{slug}/mcp 路由
 /**
  * MCP Server with Streamable HTTP transport.
  * Routes: /{slug}/mcp — each slug gets a project-scoped MCP server.

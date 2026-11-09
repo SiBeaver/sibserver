@@ -1,4 +1,3 @@
-// @bom 认知访问层/MCP协议服务 — REST/MCP Bearer 认证与项目路由
 import { createServer } from 'node:http';
 import { timingSafeEqual, createHash } from 'node:crypto';
 import { Hono } from 'hono';

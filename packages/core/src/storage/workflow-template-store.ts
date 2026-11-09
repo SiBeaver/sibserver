@@ -1,7 +1,6 @@
 import type { JsonbParam, Sql } from './db.js';
 import type { WorkflowContract, WorkflowTemplateRecord } from '../workflow/types.js';
 
-// @bom 组织层/执行器适配
 // @sibom r-wt1a — 模板引用登记：id/harness/format/path/commit/sha256，重复登记更新引用并保留 created_at
 // ============================================================
 // WorkflowTemplateStore — 工作流模板引用（只存引用与声明，不存执行逻辑）

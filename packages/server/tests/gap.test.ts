@@ -171,7 +171,7 @@ describe('Gap 引擎三方对账', () => {
     expect(all.filter(r => r.status === 'resolved').length).toBeGreaterThan(0);
   });
 
-  it('需求过时检测：需求键失配可发现（约束 / sibs 节点 / @bom 标签 / 在办 witem / @sibom 悬空）', async () => {
+  it('需求过时检测：需求键失配可发现（约束 / sibs 节点 / 在办 witem / @sibom 悬空）', async () => {
     const bom = bomV1();
     const constraints = constraintsV1();
     constraints.push({
@@ -199,15 +199,13 @@ describe('Gap 引擎三方对账', () => {
     });
     await baseline(bom, NOW, constraints);
     await report([
-      { source_id: 'bom-tags', payload: { tags: [{ key: 'dom/dead', file: 'src/a.ts' }, { key: 'dom/req-a', file: 'src/b.ts' }] } },
       { source_id: 'sibom-tags', payload: { rules: [{ id: 'r-zzzz', file: 'src/x.ts' }] } },
     ], LATER);
     const ledger = await listGaps(ctx);
     const stale = ledger.gaps.filter(g => g.kind === 'staleness');
-    expect(stale.map(g => g.requirement_key).sort()).toEqual(['(global)', 'dom/dead', 'dom/ghost', 'dom/ghost', 'dom/gone'].sort());
+    expect(stale.map(g => g.requirement_key).sort()).toEqual(['(global)', 'dom/ghost', 'dom/ghost', 'dom/gone'].sort());
     expect(stale.find(g => g.source_ref === 'c-gone')?.evidence_source).toBe('constraint:c-gone');
     expect(stale.find(g => g.source_ref === 'witem-1')?.evidence_source).toBe('witem:witem-1');
-    expect(stale.find(g => g.source_ref === '@bom:dom/dead')?.detail).toContain('src/a.ts');
     const staleSibom = stale.find(g => g.source_ref === '@sibom:r-zzzz');
     expect(staleSibom).toBeTruthy();
     expect(staleSibom?.detail).toContain('src/x.ts');
@@ -358,6 +356,19 @@ describe('Gap 引擎三方对账', () => {
     expect(ledger.gaps.find(g => g.source_ref === 'r-cccc')?.evidence_reported_at).toBe(LATER);
   });
 
+  it('已退役 bom-tags 证据不参与对账，也不进入对照视图', async () => {
+    await baseline(bomV1(), NOW);
+    await report([
+      { source_id: 'bom-tags', payload: { tags: [{ key: 'dom/gone', file: 'src/a.ts' }] } },
+      { source_id: 'sibom-tags', payload: { rules: [] } },
+    ], LATER);
+
+    const ledger = await listGaps(ctx);
+    expect(ledger.gaps.find(g => g.evidence_source.startsWith('@bom:'))).toBeUndefined();
+    const scene = await buildEvidenceScene(ctx, 'dom/gone');
+    expect(scene.files).toEqual([]);
+  });
+
   it('对照视图证据聚合：files / runs / sibs_nodes 按需求键过滤', async () => {
     await ctx.nodes.insert({
       id: 'req-node-a', type: 'requirement', title: '需求A', description: '', status: 'in_execution',
@@ -376,17 +387,17 @@ describe('Gap 引擎三方对账', () => {
     await baseline(bomV1(), NOW);
     await report([
       { source_id: 'constraint:c1', payload: { matched: 5, total: 5 }, reported_at: LATER },
-      { source_id: 'bom-tags', payload: { tags: [
-        { key: 'dom/req-a', file: 'src/a.ts' },
-        { key: 'dom/req-a', file: 'src/a2.ts' },
-        { key: 'dom/req-b', file: 'src/b.ts' },
+      { source_id: 'sibom-tags', payload: { rules: [
+        { id: 'r-aaaa', file: 'src/a.ts' },
+        { id: 'r-bbbb', file: 'src/a2.ts' },
+        { id: 'r-cccc', file: 'src/b.ts' },
       ] } },
     ], LATER);
 
     const scene = await buildEvidenceScene(ctx, 'dom/req-a');
     expect(scene.requirement_key).toBe('dom/req-a');
     expect(scene.files.map(f => f.path).sort()).toEqual(['src/a.ts', 'src/a2.ts']);
-    expect(scene.files[0].bom_tag).toBe('@bom dom/req-a');
+    expect(scene.files[0].sibom_tag).toBe('@sibom r-aaaa');
     // runs：仅约束 c1（pass），验收项证据已退役
     expect(scene.runs).toHaveLength(1);
     expect(scene.runs[0].result).toBe('pass');

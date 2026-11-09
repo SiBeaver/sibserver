@@ -51,7 +51,7 @@ interface DesiredGap {
   detail: string;
   severity: string;
   source_ref: string;
-  /** 身份三元组之证据源（r-gl3c）：constraint:{id} / sibom-tags:{ruleId} / @bom:{key} / @sibom:{ruleId} / node:{id} / witem:{id} */
+  /** 身份三元组之证据源（r-gl3c）：constraint:{id} / sibom-tags:{ruleId} / @sibom:{ruleId} / node:{id} / witem:{id} */
   evidence_source: string;
   condition_fingerprint: string;
   evidence_fingerprint: string | null;
@@ -211,33 +211,6 @@ async function computeDesiredGaps(
       constraint_set_id: null,
       constraint_set_hash: null,
     });
-  }
-
-  const tagsEv = await ctx.gap.getEvidence('bom-tags');
-  if (tagsEv) {
-    const tags = ((tagsEv.payload as { tags?: Array<{ key: string; file: string }> }).tags ?? []);
-    const staleByKey = new Map<string, string[]>();
-    for (const tag of tags) {
-      if (bomKeys.has(tag.key)) continue;
-      const files = staleByKey.get(tag.key) ?? [];
-      files.push(tag.file);
-      staleByKey.set(tag.key, files);
-    }
-    for (const [key, files] of staleByKey) {
-      gaps.push({
-        requirement_key: key,
-        kind: 'staleness',
-        title: `代码 @bom 标签指向的需求键不在 BOM 中`,
-        detail: files.join(', '),
-        severity: 'medium',
-        source_ref: `@bom:${key}`,
-        evidence_source: `@bom:${key}`,
-        condition_fingerprint: fingerprint({ t: 'stale-tag', key }),
-        evidence_fingerprint: fingerprint(files),
-        constraint_set_id: null,
-        constraint_set_hash: null,
-      });
-    }
   }
 
   if (sibomEv) {
@@ -572,7 +545,8 @@ export interface EvidenceReportResult extends ReconcileResult {
 }
 
 // @sibom r-el1a — 证据按基线版本组织：记录观测时的 baseline_commit，append-only 留痕可追溯
-// @sibom r-el2b — 证据以 source_id（constraint:{id} / sibom-tags / bom-tags）为锚定判据单位入账
+// @sibom r-ec1a — 证据只接收来源侧上报（代码认领/测试/检查输出），控制面不扫描工作区
+// @sibom r-el2b — 证据以 source_id（constraint:{id} / sibom-tags）为锚定判据单位入账
 // @sibom r-vb2b — 证据上报只写证据并重算，绝不推进基线；约束从已注册约束集解析
 export async function reportEvidence(
   ctx: OperationContext,
@@ -613,8 +587,8 @@ export async function reportEvidence(
       baseline_commit: item.baseline_commit ?? baseline.bom_commit,
     });
     accepted++;
-    // 增量（r-gl5e）：constraint 项标键重算该约束；sibom-tags 项重算全部规则认领；
-    // bom-tags 项只影响 staleness（恒全量）。staleness 恒全量，无需标键。
+    // 增量（r-gl5e）：constraint 项标键重算该约束；sibom-tags 项重算全部规则认领。
+    // staleness 恒全量，无需标键。
     const constraintMatch = item.source_id.match(/^constraint:(.+)$/);
     if (constraintMatch) {
       affectedKeys.add(constraintByIdKey.get(constraintMatch[1]) ?? GLOBAL_KEY);
@@ -701,7 +675,6 @@ export async function listGaps(ctx: OperationContext): Promise<{
 function evidenceSourceIdOf(row: GapRowRecord): string | null {
   if (row.evidence_source.startsWith('constraint:')) return row.evidence_source;
   if (row.evidence_source.startsWith('sibom-tags')) return 'sibom-tags';
-  if (row.evidence_source.startsWith('@bom:')) return 'bom-tags';
   // node:/witem:/@sibom: 等无上报时间
   return null;
 }
@@ -749,15 +722,21 @@ export async function buildEvidenceScene(
   const constraintById = new Map<string, BomConstraint>();
   for (const constraint of currentSet?.constraints ?? []) constraintById.set(constraint.id, constraint);
 
-  for (const ev of evidence) {
-    if (ev.source_id === 'bom-tags') {
-      const tags = (ev.payload as { tags?: Array<{ key: string; file: string }> }).tags ?? [];
-      for (const tag of tags) {
-        if (tag.key !== requirementKey) continue;
-        scene.files.push({ path: tag.file, bom_tag: `@bom ${tag.key}` });
-      }
-      continue;
+  const requirement = baseline
+    ? [...baseline.bom.requirements, ...baseline.bom.draft_requirements].find(r => r.key === requirementKey)
+    : undefined;
+  const ruleIds = new Set((requirement?.rules ?? []).map(rule => rule.id));
+  // files 由当前 sibom-tags 证据与基线规则归属求交派生；无基线时为空
+  const sibomEv = evidence.find(ev => ev.source_id === 'sibom-tags');
+  if (sibomEv && ruleIds.size > 0) {
+    const claims = (sibomEv.payload as { rules?: Array<{ id: string; file: string }> }).rules ?? [];
+    for (const claim of claims) {
+      if (!ruleIds.has(claim.id)) continue;
+      scene.files.push({ path: claim.file, sibom_tag: `@sibom ${claim.id}` });
     }
+  }
+
+  for (const ev of evidence) {
     const constraintMatch = ev.source_id.match(/^constraint:(.+)$/);
     if (constraintMatch && baseline) {
       const constraint = constraintById.get(constraintMatch[1]);

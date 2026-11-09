@@ -6,7 +6,6 @@ import type {
 } from '@sibeaver/core';
 import { WorkflowTemplateInput as WorkflowTemplateInputSchema, validateWorkflowContract } from '@sibeaver/core';
 
-// @bom 组织层/执行器适配
 // 工作流模板薄壳（r-ea2b）
 //
 // 原生工作流文件是执行权威：本模块只登记引用、校验 contract 声明与门禁证据，
