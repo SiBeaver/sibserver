@@ -124,9 +124,17 @@ export async function createClaim(
 
   const requirementKeys = normalizeKeys(input.requirement_keys);
   const known = new Set(baseline.bom.requirements.map(requirement => requirement.key));
+  // 引导死锁：新增需求叶已由 BOM 投影为 requirement 节点，但入基线前也要能登记责任
+  const projected = await ctx.nodes.getByType('requirement');
+  for (const node of projected) {
+    if (node.type !== 'requirement' || node.status === 'deprecated') continue;
+    // 只认 BOM 投影（sibc bom sync），不认任意来源自造的 requirement 节点
+    if (node.source !== 'vibespec' || !node.source_detail) continue;
+    known.add(node.source_detail);
+  }
   const unknown = requirementKeys.filter(key => !known.has(key));
   if (unknown.length > 0) {
-    throw new ClaimError(`需求键不在当前基线：${unknown.join(', ')}`, 400);
+    throw new ClaimError(`需求键不在当前基线或投影：${unknown.join(', ')}`, 400);
   }
 
   validateBoundary(input.domain, input.boundary);

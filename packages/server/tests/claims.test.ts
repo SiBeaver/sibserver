@@ -99,6 +99,51 @@ describe('责任认领（claims）', () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it('已投影但未入基线的需求键可认领（引导不阻塞）', async () => {
+    await ctx.nodes.insert({
+      id: '01J0000000000000000000001',
+      type: 'requirement',
+      title: '需求D',
+      description: '',
+      status: 'proposed',
+      tags: [],
+      created_at: NOW,
+      updated_at: NOW,
+      metadata: {},
+      priority: 'medium',
+      source: 'vibespec',
+      source_detail: 'dom/d',
+      acceptance: null,
+    });
+
+    const claim = await createClaim(ctx, claimInput('agent-1', ['dom/d'], boundary(['src/d/'])));
+    expect(claim.status).toBe('active');
+    expect(claim.requirement_keys).toEqual(['dom/d']);
+    expect(claim.baseline_commit).toBe('b1');
+  });
+
+  it('非 BOM 投影来源的 requirement 节点不构成准入', async () => {
+    await ctx.nodes.insert({
+      id: '01J0000000000000000000002',
+      type: 'requirement',
+      title: '手造需求',
+      description: '',
+      status: 'proposed',
+      tags: [],
+      created_at: NOW,
+      updated_at: NOW,
+      metadata: {},
+      priority: 'medium',
+      source: 'manual',
+      source_detail: 'dom/fake',
+      acceptance: null,
+    });
+
+    await expect(
+      createClaim(ctx, claimInput('agent-1', ['dom/fake'], boundary(['src/fake/']))),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it('越界即失败：记录越界证据并关闭认领', async () => {
     const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
     const result = await reportClaim(ctx, claim.id, {

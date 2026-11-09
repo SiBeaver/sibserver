@@ -752,16 +752,28 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     }));
   }));
 
-  server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认', {
-    workpack_id: z.string().describe('工作包 ID'),
-    proposer: z.string().describe('提案者（须持有该工作包认领）'),
+  server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道', {
+    workpack_id: z.string().optional().describe('工作包 ID（旧通道；与 claim_id 二选一）'),
+    claim_id: z.string().optional().describe('责任认领 ID（主通道；与 workpack_id 二选一）'),
+    proposer: z.string().describe('提案者（claim 通道须为认领执行者）'),
     summary: z.string().describe('变更摘要'),
-    requirement_keys: z.array(z.string()).describe('受影响的需求键（须在工作包责任范围内）'),
+    requirement_keys: z.array(z.string()).min(1).describe('受影响的需求键（须在认领责任范围内）'),
+    detail: z.unknown().optional(),
   }, log('propose_contract_change', async (args) => {
+    if (args.claim_id) {
+      return jsonResult(await proposeClaimContractChange(getCtx(), args.claim_id, {
+        proposer: args.proposer,
+        summary: args.summary,
+        requirement_keys: args.requirement_keys,
+        detail: args.detail,
+      }));
+    }
+    if (!args.workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
     return jsonResult(await proposeContractChange(getCtx(), args.workpack_id, {
       proposer: args.proposer,
       summary: args.summary,
       requirement_keys: args.requirement_keys,
+      detail: args.detail,
     }));
   }));
 
@@ -1398,17 +1410,29 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     }));
   }));
 
-  server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认', {
+  server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道', {
     project: projectParam,
-    workpack_id: z.string().describe('工作包 ID'),
-    proposer: z.string().describe('提案者（须持有该工作包认领）'),
+    workpack_id: z.string().optional().describe('工作包 ID（旧通道；与 claim_id 二选一）'),
+    claim_id: z.string().optional().describe('责任认领 ID（主通道；与 workpack_id 二选一）'),
+    proposer: z.string().describe('提案者（claim 通道须为认领执行者）'),
     summary: z.string().describe('变更摘要'),
-    requirement_keys: z.array(z.string()).describe('受影响的需求键（须在工作包责任范围内）'),
+    requirement_keys: z.array(z.string()).min(1).describe('受影响的需求键（须在认领责任范围内）'),
+    detail: z.unknown().optional(),
   }, log('propose_contract_change', async ({ project, ...args }) => {
+    if (args.claim_id) {
+      return jsonResult(await proposeClaimContractChange(await ctx(project), args.claim_id, {
+        proposer: args.proposer,
+        summary: args.summary,
+        requirement_keys: args.requirement_keys,
+        detail: args.detail,
+      }));
+    }
+    if (!args.workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
     return jsonResult(await proposeContractChange(await ctx(project), args.workpack_id, {
       proposer: args.proposer,
       summary: args.summary,
       requirement_keys: args.requirement_keys,
+      detail: args.detail,
     }));
   }));
 
