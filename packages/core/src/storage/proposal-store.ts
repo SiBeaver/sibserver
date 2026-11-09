@@ -1,8 +1,9 @@
 import type { JsonbParam, Sql } from './db.js';
-import type { ProposalKind, ProposalStatus, ProposalView } from '../workpack/types.js';
+import type { ProposalKind, ProposalRef, ProposalStatus, ProposalView } from '../workpack/types.js';
 
 // ============================================================
 // ProposalStore — 契约变更/重规划提案（运行时状态）
+// 正文不入控制面：只存 BOM/git 引用；legacy detail 列保留历史不再读写
 // ============================================================
 
 export interface ProposalRecord {
@@ -13,7 +14,7 @@ export interface ProposalRecord {
   proposer: string;
   requirement_keys: string[];
   summary: string;
-  detail: unknown;
+  refs: ProposalRef[];
   status: ProposalStatus;
   created_at: string;
   confirmed_commit: string | null;
@@ -30,6 +31,7 @@ function optionalString(value: unknown): string | null {
 }
 
 function rowToProposal(row: Record<string, unknown>): ProposalRecord {
+  const refs = parseJson<unknown>(row.refs ?? []);
   return {
     id: String(row.id),
     workpack_id: optionalString(row.workpack_id),
@@ -38,7 +40,7 @@ function rowToProposal(row: Record<string, unknown>): ProposalRecord {
     proposer: String(row.proposer),
     requirement_keys: Array.isArray(row.requirement_keys) ? row.requirement_keys.map(String) : [],
     summary: String(row.summary),
-    detail: parseJson<unknown>(row.detail),
+    refs: Array.isArray(refs) ? refs as ProposalRef[] : [],
     status: row.status as ProposalStatus,
     created_at: String(row.created_at),
     confirmed_commit: optionalString(row.confirmed_commit),
@@ -56,7 +58,7 @@ export function toProposalView(record: ProposalRecord): ProposalView {
     proposer: record.proposer,
     requirement_keys: record.requirement_keys,
     summary: record.summary,
-    detail: record.detail,
+    refs: record.refs,
     status: record.status,
     created_at: record.created_at,
     confirmed_commit: record.confirmed_commit,
@@ -71,12 +73,13 @@ export class ProposalStore {
   async insertProposal(record: ProposalRecord): Promise<void> {
     await this.sql`
       INSERT INTO workpack_proposals
-        (id, project_id, workpack_id, claim_id, kind, proposer, requirement_keys, summary, detail,
+        (id, project_id, workpack_id, claim_id, kind, proposer, requirement_keys, summary, detail, refs,
          status, created_at, confirmed_commit, confirmed_by, resolved_at)
       VALUES
         (${record.id}, ${this.projectId}, ${record.workpack_id}, ${record.claim_id}, ${record.kind},
          ${record.proposer}, ${record.requirement_keys}, ${record.summary},
-         ${this.sql.json(record.detail as JsonbParam)},
+         ${this.sql.json({})},
+         ${this.sql.json(record.refs as JsonbParam)},
          ${record.status}, ${record.created_at}, ${record.confirmed_commit},
          ${record.confirmed_by}, ${record.resolved_at})
     `;

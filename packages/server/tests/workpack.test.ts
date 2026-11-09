@@ -108,6 +108,20 @@ describe('工作包派生', () => {
 
   afterEach(async () => { await close(); });
 
+  it('已退役 bom-tags 证据不进入事实边界', async () => {
+    await ctx.gap.upsertEvidence({
+      source_id: 'bom-tags',
+      payload: { tags: [{ key: 'dom/a', file: 'legacy/bom.ts' }] },
+      fingerprint: 'fp-bom',
+      reported_at: NOW,
+      baseline_commit: 'b1',
+    });
+    const result = await listWorkpacks(ctx);
+    const a = find(result.workpacks, 'dom/a');
+    expect(a.boundary.fact_boundary.writable).toEqual(['src/a/', 'src/a/file.ts']);
+    expect(a.boundary.fact_boundary.sources).not.toContain('bom-tags');
+  });
+
   it('派生边界以账本行为准：gap_state 清空后工作包仍 derived 且 id 不变', async () => {
     const before = await listWorkpacks(ctx);
     const idBefore = find(before.workpacks, 'dom/a').id;
@@ -372,21 +386,23 @@ describe('工作包提案与重规划', () => {
 
   it('契约提案须有认领且键在责任范围；基线前移即确认', async () => {
     const a = await workpackOf('dom/a');
+    const refs = [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }];
     await expect(proposeContractChange(ctx, a.id, {
-      proposer: 'e1', summary: '无认领提案', requirement_keys: ['dom/a'],
+      proposer: 'e1', summary: '无认领提案', requirement_keys: ['dom/a'], refs,
     })).rejects.toMatchObject({ status: 409 });
 
     await claimA();
     await expect(proposeContractChange(ctx, a.id, {
-      proposer: 'e1', summary: '越界提案', requirement_keys: ['dom/b'],
+      proposer: 'e1', summary: '越界提案', requirement_keys: ['dom/b'], refs,
     })).rejects.toMatchObject({ status: 409 });
 
     const proposal = await proposeContractChange(ctx, a.id, {
-      proposer: 'e1', summary: '修改需求A判据', requirement_keys: ['dom/a'],
+      proposer: 'e1', summary: '修改需求A判据', requirement_keys: ['dom/a'], refs,
     });
     expect(proposal.kind).toBe('contract');
     expect(proposal.status).toBe('proposed');
     expect(proposal.requirement_keys).toEqual(['dom/a']);
+    expect(proposal.refs).toEqual(refs);
 
     const next = bom();
     next.commit = 'b2';
@@ -396,14 +412,26 @@ describe('工作包提案与重规划', () => {
     const confirmed = (await listProposals(ctx, 'confirmed')).find(item => item.id === proposal.id);
     expect(confirmed?.status).toBe('confirmed');
     expect(confirmed?.confirmed_commit).toBe('b2');
+    expect(confirmed?.refs).toEqual(refs);
+  });
+
+  it('契约提案拒绝正文：只接受引用（strict）', async () => {
+    const a = await claimA();
+    const legacy = {
+      proposer: 'e1', summary: '夹带正文', requirement_keys: ['dom/a'],
+      refs: [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }],
+      detail: { heavy: 'x'.repeat(64) },
+    } as unknown as Parameters<typeof proposeContractChange>[2];
+    await expect(proposeContractChange(ctx, a.id, legacy)).rejects.toThrow(/Unrecognized key/);
   });
 
   it('重规划只提案，服务端不应用；人显式接受只记录', async () => {
     const before = await listWorkpacks(ctx);
+    const refs = [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }];
     const replan = await proposeReplan(ctx, {
       proposer: 'planner',
       summary: '重新切分需求A',
-      detail: { groups: [['dom/a', 'dom/c']] },
+      refs,
     });
     expect(replan.kind).toBe('replan');
     expect(replan.status).toBe('proposed');
@@ -421,6 +449,7 @@ describe('工作包提案与重规划', () => {
     const a = await claimA();
     const proposal = await proposeContractChange(ctx, a.id, {
       proposer: 'e1', summary: '修改契约', requirement_keys: ['dom/a'],
+      refs: [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }],
     });
     await expect(confirmReplanProposal(ctx, proposal.id, {
       confirmed_by: 'owner',

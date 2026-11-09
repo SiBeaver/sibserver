@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ulid } from 'ulidx';
-import { describeTransitionRejection, echoId, entityIdMissHint, toClaimView, toProposalView } from '@sibeaver/core';
+import { ContractProposalInput, ReplanProposalInput, describeTransitionRejection, echoId, entityIdMissHint, toClaimView, toProposalView } from '@sibeaver/core';
 import type {
   BomConstraint,
   BomRequirement,
@@ -9,7 +9,6 @@ import type {
   ClaimRecord,
   ClaimView,
   ConfirmProposalInput,
-  ContractProposalInput,
   EvidenceRecord,
   ExecutorInput,
   FactBoundary,
@@ -20,7 +19,6 @@ import type {
   ProposalRecord,
   ProposalStatus,
   ProposalView,
-  ReplanProposalInput,
   ReportInput,
   TransitionMap,
   Workpack,
@@ -96,19 +94,6 @@ function deriveFactBoundary(
 ): FactBoundary {
   const writable = new Set<string>();
   const sources = new Set<string>();
-
-  const bomTags = evidence.find(item => item.source_id === 'bom-tags');
-  if (bomTags) {
-    const payload = bomTags.payload as { tags?: Array<{ key?: unknown; file?: unknown }> } | null;
-    for (const tag of payload?.tags ?? []) {
-      if (tag.key !== requirementKey) continue;
-      const file = asString(tag.file);
-      if (file) {
-        writable.add(file);
-        sources.add('bom-tags');
-      }
-    }
-  }
 
   const sibomTags = evidence.find(item => item.source_id === 'sibom-tags');
   if (sibomTags) {
@@ -525,11 +510,12 @@ export async function proposeContractChange(
   input: ContractProposalInput,
 ): Promise<ProposalView> {
   const now = new Date().toISOString();
+  const parsed = ContractProposalInput.parse(input);
   await ctx.workpacks.expireStale(now);
-  const claim = await requireActiveWorkpackClaim(ctx, workpackId, input.proposer, '提案者');
+  const claim = await requireActiveWorkpackClaim(ctx, workpackId, parsed.proposer, '提案者');
 
   const responsibility = claim.manifest.requirement_keys;
-  const invalid = input.requirement_keys.filter(key => !responsibility.includes(key));
+  const invalid = parsed.requirement_keys.filter(key => !responsibility.includes(key));
   if (invalid.length > 0) {
     throw new WorkpackError(`提案需求键不在工作包责任范围：${invalid.join(', ')}`, 409);
   }
@@ -539,10 +525,10 @@ export async function proposeContractChange(
     workpack_id: workpackId,
     claim_id: null,
     kind: 'contract',
-    proposer: input.proposer,
-    requirement_keys: [...new Set(input.requirement_keys)].sort(),
-    summary: input.summary,
-    detail: input.detail ?? {},
+    proposer: parsed.proposer,
+    requirement_keys: [...new Set(parsed.requirement_keys)].sort(),
+    summary: parsed.summary,
+    refs: parsed.refs,
     status: 'proposed',
     created_at: now,
     confirmed_commit: null,
@@ -559,15 +545,16 @@ export async function proposeReplan(
   input: ReplanProposalInput,
 ): Promise<ProposalView> {
   const now = new Date().toISOString();
+  const parsed = ReplanProposalInput.parse(input);
   const record: ProposalRecord = {
     id: ulid(),
     workpack_id: null,
     claim_id: null,
     kind: 'replan',
-    proposer: input.proposer,
+    proposer: parsed.proposer,
     requirement_keys: [],
-    summary: input.summary,
-    detail: input.detail ?? {},
+    summary: parsed.summary,
+    refs: parsed.refs,
     status: 'proposed',
     created_at: now,
     confirmed_commit: null,

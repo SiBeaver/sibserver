@@ -1,4 +1,3 @@
-// @bom 认知访问层/MCP协议服务 — MCP 工具面注册
 /**
  * Shared MCP tool registration.
  * Registers all si-beaver tools onto a given McpServer instance.
@@ -289,8 +288,8 @@ const BASELINE_SHAPE = {
 
 const EVIDENCE_REPORT_SHAPE = {
   items: z.array(z.object({
-    source_id: z.string().describe('证据源 ID：constraint:{id} / bom-tags / sibom-tags'),
-    payload: z.unknown().describe('证据载荷（constraint: {matched,total} 或 {value}；tags: {tags:[{key|id,file}]}）'),
+    source_id: z.string().describe('证据源 ID：constraint:{id} / sibom-tags'),
+    payload: z.unknown().describe('证据载荷（constraint: {matched,total} 或 {value}；sibom-tags: {rules:[{id,file}]}）'),
     reported_at: z.string().optional().describe('上报时间（ISO），缺省取服务器当前时间'),
     baseline_commit: z.string().optional().describe('观测对照的基线 commit，缺省取当前基线'),
   })).describe('证据项列表'),
@@ -557,18 +556,18 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await setBaseline(getCtx(), parseBaseline(args)));
   }));
 
-  server.tool('report_evidence', '上报证据项（constraint:{id} / bom-tags / sibom-tags）并增量重算差距', EVIDENCE_REPORT_SHAPE, log('report_evidence', async (args) => {
+  server.tool('report_evidence', '上报证据项（constraint:{id} / sibom-tags）并增量重算差距', EVIDENCE_REPORT_SHAPE, log('report_evidence', async (args) => {
     return jsonResult(await reportEvidence(getCtx(), parseEvidenceReport(args)));
   }));
 
-  server.tool('get_evidence_scene', '按需求键聚合证据对照视图（文件 @bom 标签 / 约束运行结果 / sibs 节点）', {
+  server.tool('get_evidence_scene', '按需求键聚合证据对照视图（文件 @sibom 标签 / 约束运行结果 / sibs 节点）', {
     requirement_key: z.string().describe('需求键（domain/req）'),
   }, log('get_evidence_scene', async (args) => {
     return jsonResult(await buildEvidenceScene(getCtx(), args.requirement_key));
   }));
 
   server.tool('get_evidence_history', '按证据源 ID 追溯证据上报历史（append-only）', {
-    source_id: z.string().describe('证据源 ID：constraint:{id} / bom-tags / sibom-tags'),
+    source_id: z.string().describe('证据源 ID：constraint:{id} / sibom-tags'),
   }, log('get_evidence_history', async (args) => {
     return jsonResult(await getCtx().gap.getEvidenceHistory(args.source_id));
   }));
@@ -742,13 +741,16 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     proposer: z.string().describe('提案者（须为该认领执行者）'),
     summary: z.string().describe('变更摘要'),
     requirement_keys: z.array(z.string()).min(1).describe('受影响需求键（须在认领责任范围内）'),
-    detail: z.unknown().optional(),
+    refs: z.array(z.object({
+      path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
+      commit: z.string().min(1).describe('承载变更的 git 提交'),
+    })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
   }, log('propose_claim_contract_change', async (args) => {
     return jsonResult(await proposeClaimContractChange(getCtx(), args.claim_id, {
       proposer: args.proposer,
       summary: args.summary,
       requirement_keys: args.requirement_keys,
-      detail: args.detail,
+      refs: args.refs,
     }));
   }));
 
@@ -758,14 +760,17 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     proposer: z.string().describe('提案者（claim 通道须为认领执行者）'),
     summary: z.string().describe('变更摘要'),
     requirement_keys: z.array(z.string()).min(1).describe('受影响的需求键（须在认领责任范围内）'),
-    detail: z.unknown().optional(),
+    refs: z.array(z.object({
+      path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
+      commit: z.string().min(1).describe('承载变更的 git 提交'),
+    })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
   }, log('propose_contract_change', async (args) => {
     if (args.claim_id) {
       return jsonResult(await proposeClaimContractChange(getCtx(), args.claim_id, {
         proposer: args.proposer,
         summary: args.summary,
         requirement_keys: args.requirement_keys,
-        detail: args.detail,
+        refs: args.refs,
       }));
     }
     if (!args.workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
@@ -773,15 +778,19 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
       proposer: args.proposer,
       summary: args.summary,
       requirement_keys: args.requirement_keys,
-      detail: args.detail,
+      refs: args.refs,
     }));
   }));
 
   server.tool('propose_replan', '提交重规划提案；只提案，服务端不应用、不改已确认契约', {
     proposer: z.string().describe('规划者标识'),
     summary: z.string().describe('重规划摘要'),
+    refs: z.array(z.object({
+      path: z.string().min(1).describe('规划依据文件路径'),
+      commit: z.string().min(1).describe('承载依据的 git 提交'),
+    })).optional().describe('BOM/git 引用；提案正文不入控制面'),
   }, log('propose_replan', async (args) => {
-    return jsonResult(await proposeReplan(getCtx(), { proposer: args.proposer, summary: args.summary }));
+    return jsonResult(await proposeReplan(getCtx(), { proposer: args.proposer, summary: args.summary, refs: args.refs }));
   }));
 
   server.tool('list_contract_proposals', '列出契约变更/重规划提案', {
@@ -1186,14 +1195,14 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await setBaseline(await ctx(project), parseBaseline(args)));
   }));
 
-  server.tool('report_evidence', '上报证据项（constraint:{id} / bom-tags / sibom-tags）并增量重算差距', {
+  server.tool('report_evidence', '上报证据项（constraint:{id} / sibom-tags）并增量重算差距', {
     project: projectParam,
     ...EVIDENCE_REPORT_SHAPE,
   }, log('report_evidence', async ({ project, ...args }) => {
     return jsonResult(await reportEvidence(await ctx(project), parseEvidenceReport(args)));
   }));
 
-  server.tool('get_evidence_scene', '按需求键聚合证据对照视图（文件 @bom 标签 / 约束运行结果 / sibs 节点）', {
+  server.tool('get_evidence_scene', '按需求键聚合证据对照视图（文件 @sibom 标签 / 约束运行结果 / sibs 节点）', {
     project: projectParam,
     requirement_key: z.string().describe('需求键（domain/req）'),
   }, log('get_evidence_scene', async ({ project, requirement_key }) => {
@@ -1202,7 +1211,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
 
   server.tool('get_evidence_history', '按证据源 ID 追溯证据上报历史（append-only）', {
     project: projectParam,
-    source_id: z.string().describe('证据源 ID：constraint:{id} / bom-tags / sibom-tags'),
+    source_id: z.string().describe('证据源 ID：constraint:{id} / sibom-tags'),
   }, log('get_evidence_history', async ({ project, source_id }) => {
     return jsonResult(await (await ctx(project)).gap.getEvidenceHistory(source_id));
   }));
@@ -1400,13 +1409,16 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     proposer: z.string().describe('提案者（须为该认领执行者）'),
     summary: z.string().describe('变更摘要'),
     requirement_keys: z.array(z.string()).min(1).describe('受影响需求键（须在认领责任范围内）'),
-    detail: z.unknown().optional(),
+    refs: z.array(z.object({
+      path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
+      commit: z.string().min(1).describe('承载变更的 git 提交'),
+    })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
   }, log('propose_claim_contract_change', async ({ project, ...args }) => {
     return jsonResult(await proposeClaimContractChange(await ctx(project), args.claim_id, {
       proposer: args.proposer,
       summary: args.summary,
       requirement_keys: args.requirement_keys,
-      detail: args.detail,
+      refs: args.refs,
     }));
   }));
 
@@ -1417,14 +1429,17 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     proposer: z.string().describe('提案者（claim 通道须为认领执行者）'),
     summary: z.string().describe('变更摘要'),
     requirement_keys: z.array(z.string()).min(1).describe('受影响的需求键（须在认领责任范围内）'),
-    detail: z.unknown().optional(),
+    refs: z.array(z.object({
+      path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
+      commit: z.string().min(1).describe('承载变更的 git 提交'),
+    })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
   }, log('propose_contract_change', async ({ project, ...args }) => {
     if (args.claim_id) {
       return jsonResult(await proposeClaimContractChange(await ctx(project), args.claim_id, {
         proposer: args.proposer,
         summary: args.summary,
         requirement_keys: args.requirement_keys,
-        detail: args.detail,
+        refs: args.refs,
       }));
     }
     if (!args.workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
@@ -1432,7 +1447,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
       proposer: args.proposer,
       summary: args.summary,
       requirement_keys: args.requirement_keys,
-      detail: args.detail,
+      refs: args.refs,
     }));
   }));
 
@@ -1440,8 +1455,12 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     project: projectParam,
     proposer: z.string().describe('规划者标识'),
     summary: z.string().describe('重规划摘要'),
+    refs: z.array(z.object({
+      path: z.string().min(1).describe('规划依据文件路径'),
+      commit: z.string().min(1).describe('承载依据的 git 提交'),
+    })).optional().describe('BOM/git 引用；提案正文不入控制面'),
   }, log('propose_replan', async ({ project, ...args }) => {
-    return jsonResult(await proposeReplan(await ctx(project), { proposer: args.proposer, summary: args.summary }));
+    return jsonResult(await proposeReplan(await ctx(project), { proposer: args.proposer, summary: args.summary, refs: args.refs }));
   }));
 
   server.tool('list_contract_proposals', '列出契约变更/重规划提案', {

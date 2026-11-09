@@ -224,10 +224,12 @@ describe('责任认领（claims）', () => {
 
   it('契约提案经基线前移转为 confirmed，认领同时作废', async () => {
     const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
+    const refs = [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }];
     const proposal = await proposeClaimContractChange(ctx, claim.id, {
       proposer: 'agent-1',
       summary: '补充判据',
       requirement_keys: ['dom/a'],
+      refs,
     });
 
     const changed = bom();
@@ -295,18 +297,28 @@ describe('责任认领（claims）', () => {
 
   it('契约子树写入走提案通道，确认由基线前移产生', async () => {
     const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a', 'dom/b'], boundary(['src/a/'])));
+    const refs = [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }];
     const proposal = await proposeClaimContractChange(ctx, claim.id, {
       proposer: 'agent-1',
       summary: '补充判据',
       requirement_keys: ['dom/a'],
+      refs,
     });
     expect(proposal.claim_id).toBe(claim.id);
     expect(proposal.status).toBe('proposed');
+    expect((await ctx.proposals.getProposal(proposal.id))?.refs).toEqual(refs);
+
+    const legacy = {
+      proposer: 'agent-1', summary: '夹带正文', requirement_keys: ['dom/a'], refs,
+      detail: { heavy: 'x'.repeat(64) },
+    } as unknown as Parameters<typeof proposeClaimContractChange>[2];
+    await expect(proposeClaimContractChange(ctx, claim.id, legacy)).rejects.toThrow(/Unrecognized key/);
 
     await expect(proposeClaimContractChange(ctx, claim.id, {
       proposer: 'agent-1',
       summary: '越范围',
       requirement_keys: ['dom/c'],
+      refs,
     })).rejects.toMatchObject({ status: 409 });
   });
 });

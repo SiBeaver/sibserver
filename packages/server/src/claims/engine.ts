@@ -1,5 +1,5 @@
 import { ulid } from 'ulidx';
-import { DOMAIN_FACT_TYPES, PROPOSAL_ONLY_FACT_TYPES, echoId, entityIdMissHint, toProposalView } from '@sibeaver/core';
+import { ContractProposalInput, DOMAIN_FACT_TYPES, PROPOSAL_ONLY_FACT_TYPES, echoId, entityIdMissHint, toProposalView } from '@sibeaver/core';
 import type {
   BoundaryDeclaration,
   ClaimCreateInput,
@@ -9,7 +9,6 @@ import type {
   ClaimRevokeInput,
   ClaimRenewInput,
   ClaimStatus,
-  ContractProposalInput,
   FactType,
   OperationContext,
   ProposalRecord,
@@ -327,9 +326,10 @@ export async function proposeClaimContractChange(
   input: ContractProposalInput,
 ): Promise<ProposalView> {
   const now = new Date().toISOString();
+  const parsed = ContractProposalInput.parse(input);
   await ctx.claims.expireStale(now);
-  const claim = await requireActiveClaim(ctx, id, input.proposer, '提案者');
-  const invalid = input.requirement_keys.filter(key => !claim.requirement_keys.includes(key));
+  const claim = await requireActiveClaim(ctx, id, parsed.proposer, '提案者');
+  const invalid = parsed.requirement_keys.filter(key => !claim.requirement_keys.includes(key));
   if (invalid.length > 0) {
     throw new ClaimError(`提案需求键不在认领责任范围：${invalid.join(', ')}`, 409);
   }
@@ -339,10 +339,10 @@ export async function proposeClaimContractChange(
     workpack_id: null,
     claim_id: id,
     kind: 'contract',
-    proposer: input.proposer,
-    requirement_keys: [...new Set(input.requirement_keys)].sort(),
-    summary: input.summary,
-    detail: input.detail ?? {},
+    proposer: parsed.proposer,
+    requirement_keys: [...new Set(parsed.requirement_keys)].sort(),
+    summary: parsed.summary,
+    refs: parsed.refs,
     status: 'proposed',
     created_at: now,
     confirmed_commit: null,
