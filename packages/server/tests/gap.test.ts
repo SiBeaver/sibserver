@@ -503,7 +503,7 @@ describe('Gap 引擎三方对账', () => {
       resolved_at: null, superseded_at: null,
     });
     const ledger2 = await listGaps(ctx);
-    expect(ledger2.gaps.find(g => g.source_ref === 'c1')?.waiver?.reason).toBe('冻结');
+    expect(ledger2.gaps.find(g => g.source_ref === 'c1' && g.evidence_source === 'constraint:c1')?.waiver?.reason).toBe('冻结');
     expect(ledger2.gaps.find(g => g.id === 'manual-row-1')?.waiver).toBeNull();
   });
 
@@ -791,6 +791,9 @@ describe('r-gd6f 退役：判定只有一处', () => {
       const registrations: Record<string, (args: any) => Promise<unknown>> = {};
       const fakeServer: any = {
         tool: (...args: unknown[]) => {
+          registrations[String(args[0])] = args[args.length - 1] as (a: any) => Promise<unknown>;
+        },
+        registerTool: (...args: unknown[]) => {
           registrations[String(args[0])] = args[args.length - 1] as (a: any) => Promise<unknown>;
         },
       };

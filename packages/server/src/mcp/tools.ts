@@ -736,7 +736,9 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     }));
   }));
 
-  server.tool('propose_claim_contract_change', '提交契约变更提案（契约子树写入只提案）；基线前移即人确认', {
+  server.registerTool('propose_claim_contract_change', {
+    description: '提交契约变更提案（契约子树写入只提案）；基线前移即人确认',
+    inputSchema: z.object({
     claim_id: z.string().describe('认领 ID'),
     proposer: z.string().describe('提案者（须为该认领执行者）'),
     summary: z.string().describe('变更摘要'),
@@ -746,12 +748,15 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
       commit: z.string().min(1).describe('承载变更的 git 提交'),
     })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
     detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict(),
   }, log('propose_claim_contract_change', async (args) => {
     const { claim_id, ...input } = args;
     return jsonResult(await proposeClaimContractChange(getCtx(), claim_id, input));
   }));
 
-  server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道', {
+  server.registerTool('propose_contract_change', {
+    description: '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道',
+    inputSchema: z.object({
     workpack_id: z.string().optional().describe('工作包 ID（旧通道；与 claim_id 二选一）'),
     claim_id: z.string().optional().describe('责任认领 ID（主通道；与 workpack_id 二选一）'),
     proposer: z.string().describe('提案者（claim 通道须为认领执行者）'),
@@ -762,6 +767,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
       commit: z.string().min(1).describe('承载变更的 git 提交'),
     })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
     detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict(),
   }, log('propose_contract_change', async (args) => {
     const { claim_id, workpack_id, ...input } = args;
     if (claim_id) {
@@ -771,7 +777,9 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await proposeContractChange(getCtx(), workpack_id, input));
   }));
 
-  server.tool('propose_replan', '提交重规划提案；只提案，服务端不应用、不改已确认契约', {
+  server.registerTool('propose_replan', {
+    description: '提交重规划提案；只提案，服务端不应用、不改已确认契约',
+    inputSchema: z.object({
     proposer: z.string().describe('规划者标识'),
     summary: z.string().describe('重规划摘要'),
     refs: z.array(z.object({
@@ -779,6 +787,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
       commit: z.string().min(1).describe('承载依据的 git 提交'),
     })).optional().describe('BOM/git 引用；提案正文不入控制面'),
     detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict(),
   }, log('propose_replan', async (args) => {
     return jsonResult(await proposeReplan(getCtx(), args));
   }));
@@ -1393,7 +1402,9 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     }));
   }));
 
-  server.tool('propose_claim_contract_change', '提交契约变更提案（契约子树写入只提案）；基线前移即人确认', {
+  server.registerTool('propose_claim_contract_change', {
+    description: '提交契约变更提案（契约子树写入只提案）；基线前移即人确认',
+    inputSchema: z.object({
     project: projectParam,
     claim_id: z.string().describe('认领 ID'),
     proposer: z.string().describe('提案者（须为该认领执行者）'),
@@ -1404,12 +1415,15 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
       commit: z.string().min(1).describe('承载变更的 git 提交'),
     })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
     detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict(),
   }, log('propose_claim_contract_change', async ({ project, ...args }) => {
     const { claim_id, ...input } = args;
     return jsonResult(await proposeClaimContractChange(await ctx(project), claim_id, input));
   }));
 
-  server.tool('propose_contract_change', '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道', {
+  server.registerTool('propose_contract_change', {
+    description: '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道',
+    inputSchema: z.object({
     project: projectParam,
     workpack_id: z.string().optional().describe('工作包 ID（旧通道；与 claim_id 二选一）'),
     claim_id: z.string().optional().describe('责任认领 ID（主通道；与 workpack_id 二选一）'),
@@ -1421,6 +1435,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
       commit: z.string().min(1).describe('承载变更的 git 提交'),
     })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
     detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict(),
   }, log('propose_contract_change', async ({ project, ...args }) => {
     const { claim_id, workpack_id, ...input } = args;
     if (claim_id) {
@@ -1430,7 +1445,9 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await proposeContractChange(await ctx(project), workpack_id, input));
   }));
 
-  server.tool('propose_replan', '提交重规划提案；只提案，服务端不应用、不改已确认契约', {
+  server.registerTool('propose_replan', {
+    description: '提交重规划提案；只提案，服务端不应用、不改已确认契约',
+    inputSchema: z.object({
     project: projectParam,
     proposer: z.string().describe('规划者标识'),
     summary: z.string().describe('重规划摘要'),
@@ -1439,6 +1456,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
       commit: z.string().min(1).describe('承载依据的 git 提交'),
     })).optional().describe('BOM/git 引用；提案正文不入控制面'),
     detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict(),
   }, log('propose_replan', async ({ project, ...args }) => {
     return jsonResult(await proposeReplan(await ctx(project), args));
   }));

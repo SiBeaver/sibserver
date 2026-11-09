@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { OperationContext } from '@sibeaver/core';
 import type { Sql } from '@sibeaver/core';
 import { registerTools, slimEnvelope, slimSearchResult, slimBatchResult, slimProjectStateResult } from '../src/mcp/tools.js';
@@ -12,6 +14,9 @@ function captureHandlers(ctx: OperationContext): Record<string, (args: any) => P
   const registrations: Record<string, (args: any) => Promise<unknown>> = {};
   const fakeServer: any = {
     tool: (...args: unknown[]) => {
+      registrations[String(args[0])] = args[args.length - 1] as (a: any) => Promise<unknown>;
+    },
+    registerTool: (...args: unknown[]) => {
       registrations[String(args[0])] = args[args.length - 1] as (a: any) => Promise<unknown>;
     },
   };
@@ -303,4 +308,77 @@ describe('MCP 响应瘦身', () => {
   });
 
   afterEach(async () => { await close(); });
+});
+
+
+function mcpResultText(res: unknown): string {
+  const content = (res as { content?: Array<{ text?: string }> }).content ?? [];
+  return content.map(item => item.text ?? '').join(' ');
+}
+
+// r-ar7g：提案只承载引用——MCP 传输层必须拒绝正文与未知字段，而非静默剥离
+describe('MCP 提案工具严格拒绝正文', () => {
+  let server: McpServer;
+  let client: Client;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    const db = await createTestDb();
+    const ctx = new OperationContext(db.sql, 'default');
+    server = new McpServer({ name: 'test', version: '0.0.0' });
+    registerTools(server, { mode: 'scoped', getContext: () => ctx, slug: 'test', getMetadata: () => ({}) });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    client = new Client({ name: 'test-client', version: '0.0.0' });
+    await client.connect(clientTransport);
+    close = async () => {
+      await client.close();
+      await server.close();
+      await db.close();
+    };
+  });
+
+  afterEach(async () => { await close(); });
+
+  it('propose_replan 携带 detail 被拒绝', async () => {
+    const res = await client.callTool({
+      name: 'propose_replan',
+      arguments: { proposer: 'p', summary: 's', detail: { heavy: 'x' } },
+    });
+    expect(res.isError).toBe(true);
+    expect(mcpResultText(res)).toMatch(/detail/);
+  });
+
+  it('propose_replan 未知别名字段同样被拒绝', async () => {
+    const res = await client.callTool({
+      name: 'propose_replan',
+      arguments: { proposer: 'p', summary: 's', body: 'text' },
+    });
+    expect(res.isError).toBe(true);
+    expect(mcpResultText(res)).toMatch(/body/);
+  });
+
+  it('propose_contract_change 携带 detail 被拒绝', async () => {
+    const res = await client.callTool({
+      name: 'propose_contract_change',
+      arguments: {
+        workpack_id: 'wp',
+        proposer: 'p',
+        summary: 's',
+        requirement_keys: ['dom/a'],
+        refs: [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }],
+        detail: {},
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(mcpResultText(res)).toMatch(/detail/);
+  });
+
+  it('不带正文的提案通过校验', async () => {
+    const res = await client.callTool({
+      name: 'propose_replan',
+      arguments: { proposer: 'p', summary: 's' },
+    });
+    expect(res.isError).not.toBe(true);
+  });
 });
