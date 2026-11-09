@@ -374,6 +374,37 @@ describe('MCP 提案工具严格拒绝正文', () => {
     expect(mcpResultText(res)).toMatch(/detail/);
   });
 
+  it('propose_contract_change refs 内嵌正文同样被拒绝', async () => {
+    const res = await client.callTool({
+      name: 'propose_contract_change',
+      arguments: {
+        workpack_id: 'wp',
+        proposer: 'p',
+        summary: 's',
+        requirement_keys: ['dom/a'],
+        refs: [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1', body: 'text' }],
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(mcpResultText(res)).toMatch(/body/);
+  });
+
+  it('propose_claim_contract_change 携带 detail 被拒绝', async () => {
+    const res = await client.callTool({
+      name: 'propose_claim_contract_change',
+      arguments: {
+        claim_id: 'nonexistent',
+        proposer: 'p',
+        summary: 's',
+        requirement_keys: ['dom/a'],
+        refs: [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }],
+        detail: {},
+      },
+    });
+    expect(res.isError).toBe(true);
+    expect(mcpResultText(res)).toMatch(/detail/);
+  });
+
   it('不带正文的提案通过校验', async () => {
     const res = await client.callTool({
       name: 'propose_replan',

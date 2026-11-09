@@ -326,7 +326,7 @@ CREATE INDEX IF NOT EXISTS idx_workpack_proposals_status
   ON workpack_proposals(project_id, status, created_at);
 -- 责任认领的契约提案（r-bc2b：契约子树写入仅限提案）
 ALTER TABLE workpack_proposals ADD COLUMN IF NOT EXISTS claim_id TEXT;
--- 提案正文不入控制面：只存 BOM/git 引用（r-ar7g）；detail 列保留历史不再写入
+-- 提案正文不入控制面：只存 BOM/git 引用（r-ar7g）；detail 列保留历史，新提案写空对象占位
 ALTER TABLE workpack_proposals ADD COLUMN IF NOT EXISTS refs JSONB NOT NULL DEFAULT '[]';
 
 -- 执行者画像：声明性能力记录（不路由模型，不做分派匹配）

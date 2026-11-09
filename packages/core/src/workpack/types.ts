@@ -133,7 +133,7 @@ export type ProposalStatus = z.infer<typeof ProposalStatus>;
 export const ProposalRef = z.object({
   path: z.string().min(1),
   commit: z.string().min(1),
-});
+}).strict();
 export type ProposalRef = z.infer<typeof ProposalRef>;
 
 export const ProposalView = z.object({

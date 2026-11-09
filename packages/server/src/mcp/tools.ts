@@ -746,8 +746,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     refs: z.array(z.object({
       path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
       commit: z.string().min(1).describe('承载变更的 git 提交'),
-    })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
-    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict()).min(1).describe('BOM/git 引用；提案正文不入控制面'),
     }).strict(),
   }, log('propose_claim_contract_change', async (args) => {
     const { claim_id, ...input } = args;
@@ -765,8 +764,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     refs: z.array(z.object({
       path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
       commit: z.string().min(1).describe('承载变更的 git 提交'),
-    })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
-    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict()).min(1).describe('BOM/git 引用；提案正文不入控制面'),
     }).strict(),
   }, log('propose_contract_change', async (args) => {
     const { claim_id, workpack_id, ...input } = args;
@@ -785,8 +783,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     refs: z.array(z.object({
       path: z.string().min(1).describe('规划依据文件路径'),
       commit: z.string().min(1).describe('承载依据的 git 提交'),
-    })).optional().describe('BOM/git 引用；提案正文不入控制面'),
-    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict()).optional().describe('BOM/git 引用；提案正文不入控制面'),
     }).strict(),
   }, log('propose_replan', async (args) => {
     return jsonResult(await proposeReplan(getCtx(), args));
@@ -1413,8 +1410,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     refs: z.array(z.object({
       path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
       commit: z.string().min(1).describe('承载变更的 git 提交'),
-    })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
-    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict()).min(1).describe('BOM/git 引用；提案正文不入控制面'),
     }).strict(),
   }, log('propose_claim_contract_change', async ({ project, ...args }) => {
     const { claim_id, ...input } = args;
@@ -1433,8 +1429,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     refs: z.array(z.object({
       path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
       commit: z.string().min(1).describe('承载变更的 git 提交'),
-    })).min(1).describe('BOM/git 引用；提案正文不入控制面'),
-    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict()).min(1).describe('BOM/git 引用；提案正文不入控制面'),
     }).strict(),
   }, log('propose_contract_change', async ({ project, ...args }) => {
     const { claim_id, workpack_id, ...input } = args;
@@ -1454,8 +1449,7 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     refs: z.array(z.object({
       path: z.string().min(1).describe('规划依据文件路径'),
       commit: z.string().min(1).describe('承载依据的 git 提交'),
-    })).optional().describe('BOM/git 引用；提案正文不入控制面'),
-    detail: z.never().optional().describe('已退役：提案正文不入控制面，只接受 refs'),
+    }).strict()).optional().describe('BOM/git 引用；提案正文不入控制面'),
     }).strict(),
   }, log('propose_replan', async ({ project, ...args }) => {
     return jsonResult(await proposeReplan(await ctx(project), args));
