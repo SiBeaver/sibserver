@@ -7,7 +7,8 @@ import {
   recordDecision,
   identifyRisk, registerTechDebt,
   recordKnowledge,
-  getRoadmap, witemProgress, decisionTrail, knowledgeMap,
+  linkNodes,
+  getRoadmap, witemProgress, decisionTrail, knowledgeTrail, knowledgeMap,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
 } from '../src/operations/index.js';
 
@@ -131,6 +132,133 @@ describe('Query Operations', () => {
 
     it('应该拒绝不存在的节点', async () => {
       await expect(decisionTrail(ctx, 'nonexistent')).rejects.toThrow('节点不存在：nonexistent');
+    });
+  });
+
+  // ============================================================
+  // knowledgeTrail
+  // ============================================================
+
+  describe('knowledgeTrail', () => {
+    it('应该沿显式边追溯知识来源、取代与影响', async () => {
+      const anchor = await defineWitem(ctx, { title: '锚', horizon: 'short', priority: 'medium' });
+      const oldKnowledge = await recordKnowledge(ctx, {
+        title: '旧知识', description: '旧', domain: 'db', source: 's',
+      });
+      const newKnowledge = await recordKnowledge(ctx, {
+        title: '新知识', description: '新', domain: 'db', source: 's',
+        derived_from: [anchor.witem.id],
+        invalidates: [oldKnowledge.knowledge.id],
+      });
+      const decision = await recordDecision(ctx, {
+        title: '决策', context: '情境', rationale: '原因',
+      });
+      await linkNodes(ctx, {
+        source_id: newKnowledge.knowledge.id,
+        target_id: decision.decision.id,
+        relation: 'informs',
+      });
+
+      const result = await knowledgeTrail(ctx, newKnowledge.knowledge.id);
+
+      expect(result.root.id).toBe(newKnowledge.knowledge.id);
+      expect(result.trail).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          node: expect.objectContaining({ id: oldKnowledge.knowledge.id }),
+          relation: 'supersedes',
+          direction: 'outgoing',
+          depth: 1,
+        }),
+        expect.objectContaining({
+          node: expect.objectContaining({ id: anchor.witem.id }),
+          relation: 'derived_from',
+          direction: 'incoming',
+          depth: 1,
+        }),
+        expect.objectContaining({
+          node: expect.objectContaining({ id: decision.decision.id }),
+          relation: 'informs',
+          direction: 'outgoing',
+          depth: 1,
+        }),
+      ]));
+    });
+
+    it('应该拒绝非 knowledge 起点', async () => {
+      const witem = await defineWitem(ctx, { title: '锚', horizon: 'short', priority: 'medium' });
+      await expect(knowledgeTrail(ctx, witem.witem.id)).rejects.toThrow('知识链起点类型不符');
+    });
+
+    it('应该支持 max_depth 与 relations 过滤', async () => {
+      const oldKnowledge = await recordKnowledge(ctx, {
+        title: '旧', description: '旧', domain: 'db', source: 's',
+      });
+      const newKnowledge = await recordKnowledge(ctx, {
+        title: '新', description: '新', domain: 'db', source: 's',
+        invalidates: [oldKnowledge.knowledge.id],
+      });
+
+      const depthZero = await knowledgeTrail(ctx, newKnowledge.knowledge.id, { max_depth: 0 });
+      expect(depthZero.trail).toHaveLength(0);
+
+      const onlyInforms = await knowledgeTrail(ctx, newKnowledge.knowledge.id, { relations: ['informs'] });
+      expect(onlyInforms.trail).toHaveLength(0);
+
+      await expect(knowledgeTrail(ctx, newKnowledge.knowledge.id, { relations: ['bogus'] }))
+        .rejects.toThrow('未知知识链关系');
+
+      const nanDepth = await knowledgeTrail(ctx, newKnowledge.knowledge.id, { max_depth: Number.NaN });
+      expect(nanDepth.root.id).toBe(newKnowledge.knowledge.id);
+    });
+
+    it('relates_to 默认不返回，显式请求才返回', async () => {
+      const k1 = await recordKnowledge(ctx, { title: 'K1', description: 'd', domain: 'db', source: 's' });
+      const k2 = await recordKnowledge(ctx, { title: 'K2', description: 'd', domain: 'db', source: 's' });
+      await linkNodes(ctx, {
+        source_id: k1.knowledge.id,
+        target_id: k2.knowledge.id,
+        relation: 'relates_to',
+      });
+
+      const defaultTrail = await knowledgeTrail(ctx, k1.knowledge.id);
+      expect(defaultTrail.trail).toHaveLength(0);
+
+      const explicit = await knowledgeTrail(ctx, k1.knowledge.id, { relations: ['relates_to'] });
+      expect(explicit.trail.some(t => t.node.id === k2.knowledge.id)).toBe(true);
+    });
+
+    it('应该标注 outdated 状态且防环', async () => {
+      const oldKnowledge = await recordKnowledge(ctx, { title: '旧', description: 'd', domain: 'db', source: 's' });
+      const newKnowledge = await recordKnowledge(ctx, {
+        title: '新', description: 'd', domain: 'db', source: 's',
+        invalidates: [oldKnowledge.knowledge.id],
+      });
+
+      const trail = await knowledgeTrail(ctx, newKnowledge.knowledge.id);
+      const oldStep = trail.trail.find(t => t.node.id === oldKnowledge.knowledge.id)!;
+      expect(oldStep.node.status).toBe('outdated');
+
+      await linkNodes(ctx, {
+        source_id: oldKnowledge.knowledge.id,
+        target_id: newKnowledge.knowledge.id,
+        relation: 'supersedes',
+      });
+      const cyclic = await knowledgeTrail(ctx, oldKnowledge.knowledge.id);
+      expect(cyclic.trail.filter(t => t.node.id === newKnowledge.knowledge.id)).toHaveLength(1);
+    });
+
+    it('默认深度 3 应截断更远的节点', async () => {
+      const nodes: Array<{ knowledge: { id: string } }> = [];
+      for (let i = 0; i < 5; i++) {
+        nodes.push(await recordKnowledge(ctx, {
+          title: `K${i}`, description: 'd', domain: 'db', source: 's',
+          invalidates: i > 0 ? [nodes[i - 1].knowledge.id] : undefined,
+        }));
+      }
+
+      const trail = await knowledgeTrail(ctx, nodes[4].knowledge.id);
+      expect(trail.trail.some(t => t.node.id === nodes[1].knowledge.id)).toBe(true);
+      expect(trail.trail.some(t => t.node.id === nodes[0].knowledge.id)).toBe(false);
     });
   });
 

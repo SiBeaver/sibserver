@@ -7,8 +7,12 @@ export { recordKnowledge, updateKnowledge, getKnowledgeTree, pinKnowledge, moveK
 export { linkNodes, deleteNode, getProjectState, getNodeContext } from './graph.js';
 export { batchOperations, type BatchOperationsInput, type OperationHandlerMap } from './batch.js';
 export {
-  getRoadmap, witemProgress, decisionTrail, knowledgeMap,
+  getRoadmap, witemProgress, decisionTrail, knowledgeTrail, knowledgeMap,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   getHelmSignals,
+  KNOWLEDGE_TRAIL_RELATIONS, KNOWLEDGE_TRAIL_DEFAULT_DEPTH, KNOWLEDGE_TRAIL_MAX_DEPTH,
 } from './queries.js';
-export type { HelmSignal, HelmResponse, HelmSignalType, RoadmapItem } from './queries.js';
+export type {
+  HelmSignal, HelmResponse, HelmSignalType, RoadmapItem,
+  KnowledgeTrailOptions, KnowledgeTrailStep,
+} from './queries.js';

@@ -75,6 +75,31 @@ describe('MCP 响应瘦身', () => {
     });
   });
 
+  it('knowledge_trail 只沿显式边返回知识链', async () => {
+    const first = await handlers['record_knowledge']({
+      title: '旧知识', description: 'd', domain: 'db', source: 's',
+    }) as { content: Array<{ text: string }> };
+    const firstId = JSON.parse(first.content[0].text).knowledge.id;
+
+    const second = await handlers['record_knowledge']({
+      title: '新知识', description: 'd', domain: 'db', source: 's', invalidates: [firstId],
+    }) as { content: Array<{ text: string }> };
+    const secondId = JSON.parse(second.content[0].text).knowledge.id;
+
+    const res = await handlers['knowledge_trail']({ node_id: secondId }) as { content: Array<{ text: string }> };
+    const data = JSON.parse(res.content[0].text);
+
+    expect(data.root.id).toBe(secondId);
+    expect(data.trail).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        node: expect.objectContaining({ id: firstId, status: 'outdated' }),
+        relation: 'supersedes',
+        direction: 'outgoing',
+        depth: 1,
+      }),
+    ]));
+  });
+
   it('slimEnvelope 保留标量，投影节点/边/事件（camelCase 输出）', () => {
     const out = slimEnvelope({
       witem: { id: 'g1', type: 'witem', title: 'G', status: 'active', success_criteria: ['x'] },
@@ -411,5 +436,63 @@ describe('MCP 提案工具严格拒绝正文', () => {
       arguments: { proposer: 'p', summary: 's' },
     });
     expect(res.isError).not.toBe(true);
+  });
+});
+
+describe('MCP knowledge_trail 参数校验', () => {
+  let server: McpServer;
+  let client: Client;
+  let close: () => Promise<void>;
+
+  beforeEach(async () => {
+    const db = await createTestDb();
+    const ctx = new OperationContext(db.sql, 'default');
+    server = new McpServer({ name: 'test', version: '0.0.0' });
+    registerTools(server, { mode: 'scoped', getContext: () => ctx, slug: 'test', getMetadata: () => ({}) });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    client = new Client({ name: 'test-client', version: '0.0.0' });
+    await client.connect(clientTransport);
+    close = async () => {
+      await client.close();
+      await server.close();
+      await db.close();
+    };
+  });
+
+  afterEach(async () => { await close(); });
+
+  it('拒绝超过上限的 max_depth 与未知关系', async () => {
+    const first = await client.callTool({
+      name: 'record_knowledge',
+      arguments: { title: '旧', description: 'd', domain: 'db', source: 's' },
+    });
+    const firstId = JSON.parse(mcpResultText(first)).knowledge.id;
+    const second = await client.callTool({
+      name: 'record_knowledge',
+      arguments: { title: '新', description: 'd', domain: 'db', source: 's', invalidates: [firstId] },
+    });
+    const secondId = JSON.parse(mcpResultText(second)).knowledge.id;
+
+    const tooDeep = await client.callTool({
+      name: 'knowledge_trail',
+      arguments: { node_id: secondId, max_depth: 11 },
+    });
+    expect(tooDeep.isError).toBe(true);
+
+    const badRelation = await client.callTool({
+      name: 'knowledge_trail',
+      arguments: { node_id: secondId, relations: ['bogus'] },
+    });
+    expect(badRelation.isError).toBe(true);
+
+    const ok = await client.callTool({
+      name: 'knowledge_trail',
+      arguments: { node_id: secondId },
+    });
+    expect(ok.isError).not.toBe(true);
+    const data = JSON.parse(mcpResultText(ok));
+    expect(data.root.id).toBe(secondId);
+    expect(data.trail.some((t: any) => t.node.id === firstId)).toBe(true);
   });
 });

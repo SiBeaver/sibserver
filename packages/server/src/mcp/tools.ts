@@ -15,7 +15,8 @@ import {
   identifyRisk, updateRisk, registerTechDebt,
   recordKnowledge,
   linkNodes, deleteNode, getProjectState, getNodeContext,
-  getRoadmap, witemProgress, decisionTrail, knowledgeMap,
+  getRoadmap, witemProgress, decisionTrail, knowledgeTrail, knowledgeMap,
+  KNOWLEDGE_TRAIL_RELATIONS, KNOWLEDGE_TRAIL_DEFAULT_DEPTH, KNOWLEDGE_TRAIL_MAX_DEPTH,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   batchOperations,
   BomBaselineInput, ConstraintSetInput, EvidenceReportInput, WaiverInput,
@@ -913,8 +914,8 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     target_id: z.string().describe('目标节点 ID'),
     relation: z.enum([
       'decomposes_into', 'spawns', 'produces', 'informs', 'creates',
-      'mitigates', 'addresses', 'blocks', 'relates_to', 'supersedes',
-      'evidenced_by', 'derived_from', 'fulfills', 'contradicts',
+      'addresses', 'blocks', 'relates_to', 'supersedes',
+      'evidenced_by', 'derived_from', 'fulfills',
     ]).describe('关系类型'),
     annotation: z.string().optional().describe('关系说明'),
   }, log('link_nodes', async (args) => {
@@ -978,6 +979,17 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     node_id: z.string().describe('起始节点 ID'),
   }, log('decision_trail', async (args) => {
     return jsonResult(await decisionTrail(getCtx(), args.node_id));
+  }));
+
+  server.tool('knowledge_trail', '追溯知识链', {
+    node_id: z.string().describe('知识节点 ID'),
+    max_depth: z.number().int().min(0).max(KNOWLEDGE_TRAIL_MAX_DEPTH).optional().describe(`最大深度，默认 ${KNOWLEDGE_TRAIL_DEFAULT_DEPTH}，上限 ${KNOWLEDGE_TRAIL_MAX_DEPTH}`),
+    relations: z.array(z.enum([...KNOWLEDGE_TRAIL_RELATIONS])).optional().describe('限定关系类型'),
+  }, log('knowledge_trail', async (args) => {
+    return jsonResult(await knowledgeTrail(getCtx(), args.node_id, {
+      max_depth: args.max_depth,
+      relations: args.relations,
+    }));
   }));
 
   server.tool('knowledge_map', '按领域查看知识图谱', {
@@ -1585,8 +1597,8 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     source_id: z.string(), target_id: z.string(),
     relation: z.enum([
       'decomposes_into', 'spawns', 'produces', 'informs', 'creates',
-      'mitigates', 'addresses', 'blocks', 'relates_to', 'supersedes',
-      'evidenced_by', 'derived_from', 'fulfills', 'contradicts',
+      'addresses', 'blocks', 'relates_to', 'supersedes',
+      'evidenced_by', 'derived_from', 'fulfills',
     ]),
     annotation: z.string().optional(),
   }, log('link_nodes', async ({ project, ...args }) => {
@@ -1647,6 +1659,17 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
 
   server.tool('decision_trail', '追溯决策链', { project: projectParam, node_id: z.string() }, log('decision_trail', async ({ project, node_id }) => {
     return jsonResult(await decisionTrail(await ctx(project), node_id));
+  }));
+
+  server.tool('knowledge_trail', '追溯知识链', {
+    project: projectParam, node_id: z.string(),
+    max_depth: z.number().int().min(0).max(KNOWLEDGE_TRAIL_MAX_DEPTH).optional(),
+    relations: z.array(z.enum([...KNOWLEDGE_TRAIL_RELATIONS])).optional(),
+  }, log('knowledge_trail', async ({ project, ...args }) => {
+    return jsonResult(await knowledgeTrail(await ctx(project), args.node_id, {
+      max_depth: args.max_depth,
+      relations: args.relations,
+    }));
   }));
 
   server.tool('knowledge_map', '查看知识图谱', { project: projectParam, domain: z.string().optional() }, log('knowledge_map', async ({ project, domain }) => {

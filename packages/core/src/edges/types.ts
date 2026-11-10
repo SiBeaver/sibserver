@@ -49,62 +49,71 @@ type RelationConstraint = {
   target: NodeType[];
 };
 
+/** 可写入的节点类型；risk 为遗留类型，仅在兼容关系中保留 */
+const WRITABLE_NODE_TYPES: NodeType[] = [
+  'witem', 'decision', 'knowledge', 'requirement', 'artifact', 'tech_debt',
+];
+
 export const RELATION_CONSTRAINTS: Record<RelationType, RelationConstraint> = {
   decomposes_into: {
     source: ['witem', 'requirement'],
     target: ['witem', 'requirement'],
   },
   spawns: {
-    source: [],
-    target: [],
+    source: ['decision'],
+    target: ['witem'],
   },
   produces: {
-    source: [],
-    target: ['decision', 'knowledge', 'artifact'],
+    source: ['witem', 'decision'],
+    target: ['knowledge', 'artifact'],
   },
   informs: {
     source: ['knowledge', 'decision', 'requirement'],
     target: ['decision', 'witem'],
   },
+  // risk 为遗留节点类型：creates 由 record_decision 直接写入，兼容保留（决策 01M70DKNE4YEWSPAS423TDX8YC）
   creates: {
     source: ['decision'],
     target: ['tech_debt', 'risk'],
   },
+  // 已退役关系：保留类型以读取历史边，不允许新写入（r-gm2b；退役决策 01M70E430RMT5YYMC7TVHRJKVW）
   mitigates: {
-    source: ['decision'],
-    target: ['risk'],
+    source: [],
+    target: [],
   },
   addresses: {
     source: ['decision'],
     target: ['tech_debt'],
   },
+  // risk 为遗留节点类型：identify_risk 校验需要，兼容保留（决策 01M70DKNE4YEWSPAS423TDX8YC）
   blocks: {
-    source: ['risk', 'tech_debt', 'requirement'],
+    source: ['requirement', 'witem', 'decision', 'tech_debt', 'risk'],
     target: ['witem'],
   },
   relates_to: {
-    source: ['witem', 'decision', 'risk', 'tech_debt', 'artifact', 'knowledge', 'requirement'],
-    target: ['witem', 'decision', 'risk', 'tech_debt', 'artifact', 'knowledge', 'requirement'],
+    source: WRITABLE_NODE_TYPES,
+    target: WRITABLE_NODE_TYPES,
   },
   supersedes: {
     source: ['decision', 'knowledge', 'requirement'],
     target: ['decision', 'knowledge', 'requirement'],
   },
   evidenced_by: {
-    source: ['knowledge', 'decision', 'requirement'],
+    source: ['knowledge', 'decision', 'requirement', 'witem'],
     target: ['artifact'],
   },
   derived_from: {
-    source: ['witem'],
-    target: ['knowledge'],
+    source: WRITABLE_NODE_TYPES,
+    target: WRITABLE_NODE_TYPES,
   },
   fulfills: {
     source: ['witem'],
     target: ['requirement'],
   },
+  // 已退役关系：矛盾由检索侧检测，不进入写入边（r-gm2b；退役决策 01M70E430RMT5YYMC7TVHRJKVW）
   contradicts: {
-    source: ['knowledge'],
-    target: ['requirement'],
+    source: [],
+    target: [],
   },
 };
 
@@ -114,10 +123,12 @@ export function validateRelation(
   targetType: NodeType,
 ): boolean {
   const constraint = RELATION_CONSTRAINTS[relation];
-  return (
+  const endpointsAllowed =
     constraint.source.includes(sourceType) &&
-    constraint.target.includes(targetType)
-  );
+    constraint.target.includes(targetType);
+  // supersedes 必须同类型：decision→decision / knowledge→knowledge / requirement→requirement
+  if (relation === 'supersedes') return endpointsAllowed && sourceType === targetType;
+  return endpointsAllowed;
 }
 
 /** 关系允许的源/目标节点类型集合（单点真值，供拒绝文案复用） */

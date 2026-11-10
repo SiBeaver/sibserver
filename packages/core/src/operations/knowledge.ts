@@ -2,9 +2,12 @@ import { ulid } from 'ulidx';
 import type { OperationContext } from './context.js';
 import type { Edge } from '../edges/types.js';
 import type { KnowledgeNode } from '../nodes/types.js';
-import { validateRelation, describeRelationTypes } from '../edges/types.js';
-import type { NodeType } from '../nodes/types.js';
 import { echoId, nodeIdMissHint } from '../nodes/id.js';
+
+// record_knowledge 的 derived_from 窄语义：图矩阵允许任意类型，工具层只接受 witem
+const DERIVED_FROM_SOURCES = ['witem'];
+const DERIVED_FROM_TARGETS = ['knowledge'];
+const DERIVED_FROM_TYPES = `允许的源类型：[${DERIVED_FROM_SOURCES.join(', ')}]，允许的目标类型：[${DERIVED_FROM_TARGETS.join(', ')}]`;
 
 // ============================================================
 // record_knowledge — 记录知识
@@ -55,9 +58,10 @@ export async function recordKnowledge(ctx: OperationContext, input: RecordKnowle
 
     for (const fromId of input.derived_from ?? []) {
       const from = await tx.nodes.getById(fromId);
-      if (!from || !validateRelation('derived_from', from.type as NodeType, 'knowledge')) {
+      // 知识派生来源只接受 witem：derived_from 在图上允许任意类型，但 record_knowledge 保持窄语义
+      if (!from || from.type !== 'witem') {
         const detail = from
-          ? `（实际类型 ${from.type}；${describeRelationTypes('derived_from')}）`
+          ? `（实际类型 ${from.type}；${DERIVED_FROM_TYPES}）`
           : nodeIdMissHint(fromId);
         throw new Error(`来源节点不存在或类型不符：${echoId(fromId)}${detail}`);
       }

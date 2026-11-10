@@ -13,7 +13,8 @@ import {
   identifyRisk, updateRisk, registerTechDebt,
   recordKnowledge, updateKnowledge, getKnowledgeTree, pinKnowledge, moveKnowledge,
   linkNodes, deleteNode, getProjectState, getNodeContext,
-  getRoadmap, witemProgress, decisionTrail, knowledgeMap,
+  getRoadmap, witemProgress, decisionTrail, knowledgeTrail, knowledgeMap,
+  KNOWLEDGE_TRAIL_RELATIONS, KNOWLEDGE_TRAIL_MAX_DEPTH,
   staleItems, currentBlockers, recentActivity, fullTextSearch,
   getHelmSignals,
   batchOperations,
@@ -73,7 +74,7 @@ export const operationHandlers: Record<string, (ctx: OperationContext, input: an
 // createHonoApp — 创建配置好所有路由的 Hono app
 // ============================================================
 
-function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
+export function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
   const app = new Hono();
 
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
@@ -199,6 +200,43 @@ function createHonoApp(manager: ProjectManager, authToken?: string): Hono {
       return json(c, await decisionTrail(getCtx(slug), nodeId));
     } catch (e: any) {
       return json(c, { error: e.message }, 404);
+    }
+  });
+
+  app.get('/:project/api/v1/nodes/:id/knowledge-trail', async (c) => {
+    const slug = c.req.param('project');
+    const nodeId = c.req.param('id');
+    const maxDepthRaw = c.req.query('max_depth');
+    const maxDepth = maxDepthRaw === undefined || maxDepthRaw === ''
+      ? undefined
+      : Number(maxDepthRaw);
+    if (
+      maxDepth !== undefined &&
+      (!Number.isInteger(maxDepth) || maxDepth < 0 || maxDepth > KNOWLEDGE_TRAIL_MAX_DEPTH)
+    ) {
+      return json(c, { error: `无效的 max_depth：需要 0–${KNOWLEDGE_TRAIL_MAX_DEPTH} 的整数` }, 400);
+    }
+    const relationsRaw = c.req.query('relations');
+    const relations = relationsRaw?.split(',').map(r => r.trim()).filter(Boolean);
+    const allowedRelations = new Set<string>(KNOWLEDGE_TRAIL_RELATIONS);
+    if (relations?.some(r => !allowedRelations.has(r))) {
+      return json(c, { error: '无效的 relations：包含未知关系类型' }, 400);
+    }
+    try {
+      return json(c, await knowledgeTrail(getCtx(slug), nodeId, {
+        max_depth: maxDepth,
+        relations: relations && relations.length > 0 ? relations : undefined,
+      }));
+    } catch (e: any) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (message.startsWith('节点不存在')) return json(c, { error: message }, 404);
+      if (
+        message.startsWith('知识链起点类型不符') ||
+        message.startsWith('未知知识链关系')
+      ) {
+        return json(c, { error: message }, 400);
+      }
+      return json(c, { error: '知识链遍历失败' }, 500);
     }
   });
 

@@ -162,6 +162,91 @@ export async function decisionTrail(ctx: OperationContext, nodeId: string) {
 }
 
 // ============================================================
+// knowledge_trail — 追溯知识链
+// ============================================================
+
+// @sibom r-kn7g — 知识链沿显式边追溯：默认五关系、relates_to 显式、深度上限 10
+/** 知识链允许的显式关系；relates_to 需显式请求 */
+export const KNOWLEDGE_TRAIL_RELATIONS = [
+  'supersedes', 'derived_from', 'informs', 'produces', 'evidenced_by', 'relates_to',
+] as const;
+
+/** 知识链默认关系（不含 relates_to，避免兜底关联放大噪声） */
+const DEFAULT_KNOWLEDGE_RELATIONS = KNOWLEDGE_TRAIL_RELATIONS.filter(r => r !== 'relates_to');
+
+export const KNOWLEDGE_TRAIL_DEFAULT_DEPTH = 3;
+
+/** 知识链最大深度上限，防止无界遍历 */
+export const KNOWLEDGE_TRAIL_MAX_DEPTH = 10;
+
+export interface KnowledgeTrailOptions {
+  max_depth?: number;
+  relations?: string[];
+}
+
+export interface KnowledgeTrailStep {
+  node: CognitiveNode;
+  relation: string;
+  direction: 'incoming' | 'outgoing';
+  depth: number;
+}
+
+export async function knowledgeTrail(
+  ctx: OperationContext,
+  nodeId: string,
+  options: KnowledgeTrailOptions = {},
+) {
+  const root = await ctx.nodes.getById(nodeId);
+  if (!root) throw new Error(`节点不存在：${echoId(nodeId)}${nodeIdMissHint(nodeId)}`);
+  if (root.type !== 'knowledge') {
+    throw new Error(`知识链起点类型不符：${echoId(nodeId)} 是 ${root.type}；需要 knowledge 类型节点`);
+  }
+
+  const requestedRelations = options.relations ?? DEFAULT_KNOWLEDGE_RELATIONS;
+  const unknownRelations = requestedRelations.filter(
+    r => !(KNOWLEDGE_TRAIL_RELATIONS as readonly string[]).includes(r),
+  );
+  if (unknownRelations.length > 0) {
+    throw new Error(`未知知识链关系：${unknownRelations.join(', ')}`);
+  }
+  const allowed = new Set(requestedRelations);
+
+  const requestedDepth = options.max_depth;
+  const maxDepth = Number.isFinite(requestedDepth)
+    ? Math.min(KNOWLEDGE_TRAIL_MAX_DEPTH, Math.max(0, Math.trunc(requestedDepth as number)))
+    : KNOWLEDGE_TRAIL_DEFAULT_DEPTH;
+  const trail: KnowledgeTrailStep[] = [];
+  const visited = new Set<string>([nodeId]);
+
+  async function walk(id: string, depth: number): Promise<void> {
+    if (depth >= maxDepth) return;
+    const edges = await ctx.edges.getByNode(id);
+    for (const edge of edges) {
+      if (!allowed.has(edge.relation)) continue;
+
+      const outgoing = edge.source_id === id;
+      const otherId = outgoing ? edge.target_id : edge.source_id;
+      if (visited.has(otherId)) continue;
+
+      const other = await ctx.nodes.getById(otherId);
+      if (!other) continue;
+
+      visited.add(other.id);
+      trail.push({
+        node: other,
+        relation: edge.relation,
+        direction: outgoing ? 'outgoing' : 'incoming',
+        depth: depth + 1,
+      });
+      await walk(other.id, depth + 1);
+    }
+  }
+
+  await walk(nodeId, 0);
+  return { root, trail };
+}
+
+// ============================================================
 // knowledge_map — 按领域查看知识
 // ============================================================
 

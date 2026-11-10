@@ -324,6 +324,78 @@ describe('Operations Layer', () => {
         relation: 'fulfills',
       })).rejects.toThrow('无效关系「fulfills」：witem → witem');
     });
+
+    it('应该允许 knowledge 与 decision 的显式关系', async () => {
+      const knowledge = await recordKnowledge(ctx, {
+        title: '知识', description: 'd', domain: 'db', source: 's',
+      });
+      const decision = await recordDecision(ctx, {
+        title: '决策', context: '情境', rationale: '原因',
+      });
+
+      const produced = await linkNodes(ctx, {
+        source_id: decision.decision.id,
+        target_id: knowledge.knowledge.id,
+        relation: 'produces',
+      });
+      expect(produced.edge.relation).toBe('produces');
+
+      const informs = await linkNodes(ctx, {
+        source_id: knowledge.knowledge.id,
+        target_id: decision.decision.id,
+        relation: 'informs',
+      });
+      expect(informs.edge.relation).toBe('informs');
+    });
+
+    it('supersedes 必须同类型', async () => {
+      const oldKnowledge = await recordKnowledge(ctx, {
+        title: '旧知识', description: 'd', domain: 'db', source: 's',
+      });
+      const newKnowledge = await recordKnowledge(ctx, {
+        title: '新知识', description: 'd', domain: 'db', source: 's',
+      });
+      const decision = await recordDecision(ctx, {
+        title: '决策', context: '情境', rationale: '原因',
+      });
+
+      await expect(linkNodes(ctx, {
+        source_id: newKnowledge.knowledge.id,
+        target_id: decision.decision.id,
+        relation: 'supersedes',
+      })).rejects.toThrow('无效关系「supersedes」');
+
+      const result = await linkNodes(ctx, {
+        source_id: newKnowledge.knowledge.id,
+        target_id: oldKnowledge.knowledge.id,
+        relation: 'supersedes',
+      });
+      expect(result.edge.relation).toBe('supersedes');
+    });
+
+    it('应该拒绝已退役的写入关系', async () => {
+      const k1 = await recordKnowledge(ctx, {
+        title: '知识1', description: 'd', domain: 'db', source: 's',
+      });
+      const k2 = await recordKnowledge(ctx, {
+        title: '知识2', description: 'd', domain: 'db', source: 's',
+      });
+      const decision = await recordDecision(ctx, {
+        title: '决策', context: '情境', rationale: '原因',
+      });
+
+      await expect(linkNodes(ctx, {
+        source_id: k1.knowledge.id,
+        target_id: k2.knowledge.id,
+        relation: 'contradicts',
+      })).rejects.toThrow('无效关系「contradicts」');
+
+      await expect(linkNodes(ctx, {
+        source_id: decision.decision.id,
+        target_id: k1.knowledge.id,
+        relation: 'mitigates',
+      })).rejects.toThrow('无效关系「mitigates」');
+    });
   });
 
   describe('getProjectState', () => {
