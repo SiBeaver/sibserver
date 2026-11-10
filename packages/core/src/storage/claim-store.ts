@@ -6,7 +6,7 @@ import type {
   PreAuthorization,
   SessionRef,
 } from '../claims/types.js';
-import type { IsolationMode } from '../workpack/types.js';
+import type { IsolationMode } from '../claims/types.js';
 
 // ============================================================
 // ClaimStore — 责任认领租约（运行时状态，不进契约/认知图谱）

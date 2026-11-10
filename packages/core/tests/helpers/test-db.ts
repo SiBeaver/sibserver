@@ -11,7 +11,7 @@ export function testConnectionString(): string {
 const TRUNCATE_TABLES = [
   'projects', 'config', 'nodes', 'edges', 'events',
   'gap_baseline', 'gap_rows', 'gap_evidence', 'gap_evidence_log', 'gap_waivers',
-  'workpack_claims', 'workpack_proposals', 'executor_profiles',
+  'workpack_proposals', 'executor_profiles',
   'claims', 'claim_keys',
 ];
 

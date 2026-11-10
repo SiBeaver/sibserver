@@ -25,11 +25,7 @@ import type { DirectSibsContext } from '../sibs-client.js';
 import { config } from '../config/index.js';
 import { snakeToCamel, camelToSnake, kebabToSnake, toApiEvent } from './transforms.js';
 import { setBaseline, reportEvidence, reconcile, listGaps, buildEvidenceScene, signWaiversByCondition, registerConstraintSet, listConstraintSets } from '../gap/engine.js';
-import {
-  claimWorkpack, confirmReplanProposal, listProposals, listWorkpacks,
-  narrowWorkpackBoundary, proposeContractChange, proposeReplan,
-  releaseWorkpack, renewWorkpack, reportWorkpack, WorkpackError,
-} from '../workpack/engine.js';
+import { listProposals } from '../proposals/engine.js';
 import { listExecutors, registerExecutor } from '../executor/engine.js';
 import {
   checkWorkflowTemplateGates, getWorkflowTemplate, listWorkflowTemplates, registerWorkflowTemplate,
@@ -39,11 +35,11 @@ import {
   proposeClaimContractChange, releaseClaim, renewClaim, reportClaim, revokeClaim,
 } from '../claims/engine.js';
 import {
-  BomBaselineInput, ClaimInput, ClaimCreateInput, ClaimNarrowInput, ClaimReleaseInput,
+  BomBaselineInput, ClaimCreateInput, ClaimNarrowInput, ClaimReleaseInput,
   ClaimRenewInput, ClaimReportInput, ClaimRevokeInput, ClaimStatus,
-  ConfirmProposalInput, ConstraintSetInput, ContractProposalInput,
-  EvidenceReportInput, ExecutorInput, ExecutorProfileInput, NarrowBoundaryInput,
-  ProposalStatus, ReplanProposalInput, ReportInput, WaiverInput, WorkflowTemplateInput,
+  ConstraintSetInput, ContractProposalInput,
+  EvidenceReportInput, ExecutorProfileInput,
+  ProposalStatus, WaiverInput, WorkflowTemplateInput,
 } from '@sibeaver/core';
 
 // ============================================================
@@ -414,11 +410,6 @@ export function createHonoApp(manager: ProjectManager, authToken?: string): Hono
     }
   });
 
-  app.get('/:project/api/v1/workpacks', async (c) => {
-    const slug = c.req.param('project');
-    return json(c, await listWorkpacks(getCtx(slug)));
-  });
-
   app.get('/:project/api/v1/executors', async (c) => {
     const slug = c.req.param('project');
     return json(c, await listExecutors(getCtx(slug)));
@@ -459,100 +450,12 @@ export function createHonoApp(manager: ProjectManager, authToken?: string): Hono
     return json(c, result);
   });
 
-  app.post('/:project/api/v1/workpacks/:id/claim', async (c) => {
-    const slug = c.req.param('project');
-    const parsed = ClaimInput.safeParse(camelToSnake(await c.req.json()));
-    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    try {
-      return json(c, await claimWorkpack(getCtx(slug), c.req.param('id'), parsed.data));
-    } catch (e: any) {
-      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
-    }
-  });
-
-  app.post('/:project/api/v1/workpacks/:id/renew', async (c) => {
-    const slug = c.req.param('project');
-    const parsed = ExecutorInput.safeParse(camelToSnake(await c.req.json()));
-    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    try {
-      return json(c, await renewWorkpack(getCtx(slug), c.req.param('id'), parsed.data));
-    } catch (e: any) {
-      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
-    }
-  });
-
-  app.post('/:project/api/v1/workpacks/:id/release', async (c) => {
-    const slug = c.req.param('project');
-    const parsed = ExecutorInput.safeParse(camelToSnake(await c.req.json()));
-    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    try {
-      return json(c, await releaseWorkpack(getCtx(slug), c.req.param('id'), parsed.data));
-    } catch (e: any) {
-      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
-    }
-  });
-
-  app.post('/:project/api/v1/workpacks/:id/report', async (c) => {
-    const slug = c.req.param('project');
-    const parsed = ReportInput.safeParse(camelToSnake(await c.req.json()));
-    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    try {
-      return json(c, await reportWorkpack(getCtx(slug), c.req.param('id'), parsed.data));
-    } catch (e: any) {
-      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
-    }
-  });
-
-  app.post('/:project/api/v1/workpacks/:id/boundary', async (c) => {
-    const slug = c.req.param('project');
-    const parsed = NarrowBoundaryInput.safeParse(camelToSnake(await c.req.json()));
-    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    try {
-      return json(c, await narrowWorkpackBoundary(getCtx(slug), c.req.param('id'), parsed.data));
-    } catch (e: any) {
-      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
-    }
-  });
-
-  app.post('/:project/api/v1/workpacks/:id/contract-proposals', async (c) => {
-    const slug = c.req.param('project');
-    const parsed = ContractProposalInput.safeParse(camelToSnake(await c.req.json()));
-    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    try {
-      return json(c, await proposeContractChange(getCtx(slug), c.req.param('id'), parsed.data));
-    } catch (e: any) {
-      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
-    }
-  });
-
-  app.post('/:project/api/v1/workpacks/plan-proposals', async (c) => {
-    const slug = c.req.param('project');
-    const parsed = ReplanProposalInput.safeParse(camelToSnake(await c.req.json()));
-    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    try {
-      return json(c, await proposeReplan(getCtx(slug), parsed.data));
-    } catch (e: any) {
-      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
-    }
-  });
-
   app.get('/:project/api/v1/contract-proposals', async (c) => {
     const slug = c.req.param('project');
     const status = c.req.query('status');
     const parsed = status === undefined ? null : ProposalStatus.safeParse(status);
     if (parsed !== null && !parsed.success) return json(c, { error: parsed.error.message }, 400);
     return json(c, await listProposals(getCtx(slug), parsed?.data));
-  });
-
-  app.post('/:project/api/v1/contract-proposals/:id/confirm', async (c) => {
-    const slug = c.req.param('project');
-    const parsed = ConfirmProposalInput.safeParse(camelToSnake(await c.req.json()));
-    if (!parsed.success) return json(c, { error: parsed.error.message }, 400);
-    try {
-      return json(c, await confirmReplanProposal(getCtx(slug), c.req.param('id'), parsed.data));
-    } catch (e: any) {
-      return json(c, { error: e.message }, e instanceof WorkpackError ? e.status : 400);
-    }
   });
 
   app.get('/:project/api/v1/gap/baseline', async (c) => {

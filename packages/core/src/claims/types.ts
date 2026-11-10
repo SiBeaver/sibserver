@@ -1,10 +1,12 @@
 import { z } from 'zod';
-import { IsolationMode } from '../workpack/types.js';
 
 // ============================================================
 // 责任认领（claims）— 边界声明随认领提交（组织层/边界声明、认领与仲裁）
 // 控制面只登记与校验，不派发、不指令、不中断。
 // ============================================================
+
+export const IsolationMode = z.enum(['worktree', 'workspace']);
+export type IsolationMode = z.infer<typeof IsolationMode>;
 
 export const ClaimDomain = z.enum(['build', 'runtime']);
 export type ClaimDomain = z.infer<typeof ClaimDomain>;

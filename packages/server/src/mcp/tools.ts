@@ -27,11 +27,7 @@ import { camelToSnake, snakeToCamel } from '../api/transforms.js';
 import {
   buildEvidenceScene, listConstraintSets, listGaps, reconcile, registerConstraintSet, reportEvidence, setBaseline, signWaiversByCondition,
 } from '../gap/engine.js';
-import {
-  claimWorkpack, confirmReplanProposal, listProposals, listWorkpacks,
-  narrowWorkpackBoundary, proposeContractChange, proposeReplan,
-  releaseWorkpack, renewWorkpack, reportWorkpack,
-} from '../workpack/engine.js';
+import { listProposals } from '../proposals/engine.js';
 import { listExecutors, registerExecutor } from '../executor/engine.js';
 import { WorkflowContract } from '@sibeaver/core';
 import {
@@ -545,7 +541,7 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
   }));
 
   // --- 契约层基线 / Evidence 层 / GAP 层（差距查询之外：证据查询与检索、豁免、基线）---
-  // @sibom r-mp2b — MCP 工具面覆盖契约层（需求/规则查询与编辑）、Evidence 层（查询/检索/上报）、GAP 层（差距/豁免/基线）、组织层（工作包/认领/回传）与认知层（图谱读写）
+  // @sibom r-mp2b — MCP 工具面覆盖契约层（需求/规则查询与编辑）、Evidence 层（查询/检索/上报）、GAP 层（差距/豁免/基线）、组织层（认领/边界/回传）与认知层（图谱读写）
 
   server.tool('get_gap_baseline', '读取 GAP 基线：BOM commit + 需求/规则 + 约束快照（未设基线时返回 null）', {
   }, log('get_gap_baseline', async () => {
@@ -592,60 +588,6 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
 
   server.tool('list_constraint_sets', '列出已注册的约束集版本（只读）', {}, log('list_constraint_sets', async () => {
     return jsonResult(await listConstraintSets(getCtx()));
-  }));
-
-  server.tool('list_workpacks', '派生工作包：按需求键聚拢开放差距，输出边界契约、依赖、并行组与验收判据（只读）', {
-  }, log('list_workpacks', async () => {
-    return jsonResult(await listWorkpacks(getCtx()));
-  }));
-
-  server.tool('claim_workpack', '认领工作包（租约 + 隔离声明）；同一工作包同一时刻只有一个有效认领', {
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识（harness / agent 实例）'),
-    isolation_mode: z.enum(['worktree', 'workspace']).describe('worktree=独立工作区；workspace=共享工作区（串行）'),
-    isolation_id: z.string().describe('隔离标识（worktree 路径 / 分支 / 工作区 ID）'),
-  }, log('claim_workpack', async (args) => {
-    return jsonResult(await claimWorkpack(getCtx(), args.workpack_id, {
-      executor: args.executor,
-      isolation_mode: args.isolation_mode,
-      isolation_id: args.isolation_id,
-    }));
-  }));
-
-  server.tool('renew_workpack', '续租工作包认领（心跳）', {
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识'),
-  }, log('renew_workpack', async (args) => {
-    return jsonResult(await renewWorkpack(getCtx(), args.workpack_id, { executor: args.executor }));
-  }));
-
-  server.tool('release_workpack', '释放工作包认领', {
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识'),
-  }, log('release_workpack', async (args) => {
-    return jsonResult(await releaseWorkpack(getCtx(), args.workpack_id, { executor: args.executor }));
-  }));
-
-  server.tool('report_workpack', '上报执行改动并做事实边界检查；越界即失败并记录证据', {
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识'),
-    changed_files: z.array(z.string()).describe('本次执行改动的文件路径'),
-  }, log('report_workpack', async (args) => {
-    return jsonResult(await reportWorkpack(getCtx(), args.workpack_id, {
-      executor: args.executor,
-      changed_files: args.changed_files,
-    }));
-  }));
-
-  server.tool('narrow_workpack_boundary', '收窄认领的事实边界；放宽会被拒绝，须人确认', {
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识'),
-    writable: z.array(z.string()).describe('收窄后的可写范围（必须是当前边界的子集）'),
-  }, log('narrow_workpack_boundary', async (args) => {
-    return jsonResult(await narrowWorkpackBoundary(getCtx(), args.workpack_id, {
-      executor: args.executor,
-      writable: args.writable,
-    }));
   }));
 
   // === 责任认领（claims）===
@@ -754,55 +696,10 @@ function registerScopedTools(server: McpServer, opts: ScopedToolsOptions): void 
     return jsonResult(await proposeClaimContractChange(getCtx(), claim_id, input));
   }));
 
-  server.registerTool('propose_contract_change', {
-    description: '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道',
-    inputSchema: z.object({
-    workpack_id: z.string().optional().describe('工作包 ID（旧通道；与 claim_id 二选一）'),
-    claim_id: z.string().optional().describe('责任认领 ID（主通道；与 workpack_id 二选一）'),
-    proposer: z.string().describe('提案者（claim 通道须为认领执行者）'),
-    summary: z.string().describe('变更摘要'),
-    requirement_keys: z.array(z.string()).min(1).describe('受影响的需求键（须在认领责任范围内）'),
-    refs: z.array(z.object({
-      path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
-      commit: z.string().min(1).describe('承载变更的 git 提交'),
-    }).strict()).min(1).describe('BOM/git 引用；提案正文不入控制面'),
-    }).strict(),
-  }, log('propose_contract_change', async (args) => {
-    const { claim_id, workpack_id, ...input } = args;
-    if (claim_id) {
-      return jsonResult(await proposeClaimContractChange(getCtx(), claim_id, input));
-    }
-    if (!workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
-    return jsonResult(await proposeContractChange(getCtx(), workpack_id, input));
-  }));
-
-  server.registerTool('propose_replan', {
-    description: '提交重规划提案；只提案，服务端不应用、不改已确认契约',
-    inputSchema: z.object({
-    proposer: z.string().describe('规划者标识'),
-    summary: z.string().describe('重规划摘要'),
-    refs: z.array(z.object({
-      path: z.string().min(1).describe('规划依据文件路径'),
-      commit: z.string().min(1).describe('承载依据的 git 提交'),
-    }).strict()).optional().describe('BOM/git 引用；提案正文不入控制面'),
-    }).strict(),
-  }, log('propose_replan', async (args) => {
-    return jsonResult(await proposeReplan(getCtx(), args));
-  }));
-
-  server.tool('list_contract_proposals', '列出契约变更/重规划提案', {
+  server.tool('list_contract_proposals', '列出契约变更提案', {
     status: z.enum(['proposed', 'confirmed', 'superseded']).optional().describe('按状态过滤'),
   }, log('list_contract_proposals', async (args) => {
     return jsonResult(await listProposals(getCtx(), args.status));
-  }));
-
-  server.tool('confirm_replan_proposal', '人接受重规划提案（只记录，不改变派生工作包）', {
-    proposal_id: z.string().describe('提案 ID'),
-    confirmed_by: z.string().describe('确认人标识'),
-  }, log('confirm_replan_proposal', async (args) => {
-    return jsonResult(await confirmReplanProposal(getCtx(), args.proposal_id, {
-      confirmed_by: args.confirmed_by,
-    }));
   }));
 
   server.tool('register_executor', '注册/更新执行者画像（声明能力：harness、模型、并发度、隔离方式、可写范围）；纯记录，不路由模型', {
@@ -1254,66 +1151,6 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await listConstraintSets(await ctx(project)));
   }));
 
-  server.tool('list_workpacks', '派生工作包：按需求键聚拢开放差距，输出边界契约、依赖、并行组与验收判据（只读）', {
-    project: projectParam,
-  }, log('list_workpacks', async ({ project }) => {
-    return jsonResult(await listWorkpacks(await ctx(project)));
-  }));
-
-  server.tool('claim_workpack', '认领工作包（租约 + 隔离声明）；同一工作包同一时刻只有一个有效认领', {
-    project: projectParam,
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识（harness / agent 实例）'),
-    isolation_mode: z.enum(['worktree', 'workspace']).describe('worktree=独立工作区；workspace=共享工作区（串行）'),
-    isolation_id: z.string().describe('隔离标识（worktree 路径 / 分支 / 工作区 ID）'),
-  }, log('claim_workpack', async ({ project, ...args }) => {
-    return jsonResult(await claimWorkpack(await ctx(project), args.workpack_id, {
-      executor: args.executor,
-      isolation_mode: args.isolation_mode,
-      isolation_id: args.isolation_id,
-    }));
-  }));
-
-  server.tool('renew_workpack', '续租工作包认领（心跳）', {
-    project: projectParam,
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识'),
-  }, log('renew_workpack', async ({ project, ...args }) => {
-    return jsonResult(await renewWorkpack(await ctx(project), args.workpack_id, { executor: args.executor }));
-  }));
-
-  server.tool('release_workpack', '释放工作包认领', {
-    project: projectParam,
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识'),
-  }, log('release_workpack', async ({ project, ...args }) => {
-    return jsonResult(await releaseWorkpack(await ctx(project), args.workpack_id, { executor: args.executor }));
-  }));
-
-  server.tool('report_workpack', '上报执行改动并做事实边界检查；越界即失败并记录证据', {
-    project: projectParam,
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识'),
-    changed_files: z.array(z.string()).describe('本次执行改动的文件路径'),
-  }, log('report_workpack', async ({ project, ...args }) => {
-    return jsonResult(await reportWorkpack(await ctx(project), args.workpack_id, {
-      executor: args.executor,
-      changed_files: args.changed_files,
-    }));
-  }));
-
-  server.tool('narrow_workpack_boundary', '收窄认领的事实边界；放宽会被拒绝，须人确认', {
-    project: projectParam,
-    workpack_id: z.string().describe('工作包 ID'),
-    executor: z.string().describe('执行者标识'),
-    writable: z.array(z.string()).describe('收窄后的可写范围（必须是当前边界的子集）'),
-  }, log('narrow_workpack_boundary', async ({ project, ...args }) => {
-    return jsonResult(await narrowWorkpackBoundary(await ctx(project), args.workpack_id, {
-      executor: args.executor,
-      writable: args.writable,
-    }));
-  }));
-
   // === 责任认领（claims）===
 
   server.tool('list_claims', '列出责任认领（默认活跃）；按需求键互斥并携带边界声明与租约', {
@@ -1429,59 +1266,11 @@ function registerGlobalTools(server: McpServer, manager: ProjectManager): void {
     return jsonResult(await proposeClaimContractChange(await ctx(project), claim_id, input));
   }));
 
-  server.registerTool('propose_contract_change', {
-    description: '提交契约变更提案；执行者不直接修改契约，基线前移即人确认。claim_id 为主通道，workpack_id 为旧通道',
-    inputSchema: z.object({
-    project: projectParam,
-    workpack_id: z.string().optional().describe('工作包 ID（旧通道；与 claim_id 二选一）'),
-    claim_id: z.string().optional().describe('责任认领 ID（主通道；与 workpack_id 二选一）'),
-    proposer: z.string().describe('提案者（claim 通道须为认领执行者）'),
-    summary: z.string().describe('变更摘要'),
-    requirement_keys: z.array(z.string()).min(1).describe('受影响的需求键（须在认领责任范围内）'),
-    refs: z.array(z.object({
-      path: z.string().min(1).describe('契约文件路径（BOM md / spec）'),
-      commit: z.string().min(1).describe('承载变更的 git 提交'),
-    }).strict()).min(1).describe('BOM/git 引用；提案正文不入控制面'),
-    }).strict(),
-  }, log('propose_contract_change', async ({ project, ...args }) => {
-    const { claim_id, workpack_id, ...input } = args;
-    if (claim_id) {
-      return jsonResult(await proposeClaimContractChange(await ctx(project), claim_id, input));
-    }
-    if (!workpack_id) throw new Error('workpack_id 与 claim_id 至少提供一个');
-    return jsonResult(await proposeContractChange(await ctx(project), workpack_id, input));
-  }));
-
-  server.registerTool('propose_replan', {
-    description: '提交重规划提案；只提案，服务端不应用、不改已确认契约',
-    inputSchema: z.object({
-    project: projectParam,
-    proposer: z.string().describe('规划者标识'),
-    summary: z.string().describe('重规划摘要'),
-    refs: z.array(z.object({
-      path: z.string().min(1).describe('规划依据文件路径'),
-      commit: z.string().min(1).describe('承载依据的 git 提交'),
-    }).strict()).optional().describe('BOM/git 引用；提案正文不入控制面'),
-    }).strict(),
-  }, log('propose_replan', async ({ project, ...args }) => {
-    return jsonResult(await proposeReplan(await ctx(project), args));
-  }));
-
-  server.tool('list_contract_proposals', '列出契约变更/重规划提案', {
+  server.tool('list_contract_proposals', '列出契约变更提案', {
     project: projectParam,
     status: z.enum(['proposed', 'confirmed', 'superseded']).optional().describe('按状态过滤'),
   }, log('list_contract_proposals', async ({ project, ...args }) => {
     return jsonResult(await listProposals(await ctx(project), args.status));
-  }));
-
-  server.tool('confirm_replan_proposal', '人接受重规划提案（只记录，不改变派生工作包）', {
-    project: projectParam,
-    proposal_id: z.string().describe('提案 ID'),
-    confirmed_by: z.string().describe('确认人标识'),
-  }, log('confirm_replan_proposal', async ({ project, ...args }) => {
-    return jsonResult(await confirmReplanProposal(await ctx(project), args.proposal_id, {
-      confirmed_by: args.confirmed_by,
-    }));
   }));
 
   server.tool('register_executor', '注册/更新执行者画像（声明能力：harness、模型、并发度、隔离方式、可写范围）；纯记录，不路由模型', {

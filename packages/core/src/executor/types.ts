@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { IsolationMode } from '../workpack/types.js';
+import { IsolationMode } from '../claims/types.js';
 
 // ============================================================
 // 执行者画像 — 执行面声明的能力（r-ea3c / r-ea4d）

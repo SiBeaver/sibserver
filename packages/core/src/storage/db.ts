@@ -248,27 +248,6 @@ CREATE TABLE IF NOT EXISTS gap_waivers (
   PRIMARY KEY (project_id, fingerprint)
 );
 
--- 工作组织控制面：认领租约（运行时状态，不进契约/认知图谱）
-CREATE TABLE IF NOT EXISTS workpack_claims (
-  id TEXT NOT NULL,
-  project_id TEXT NOT NULL REFERENCES projects(slug),
-  workpack_id TEXT NOT NULL,
-  executor TEXT NOT NULL,
-  isolation_mode TEXT NOT NULL,
-  isolation_id TEXT NOT NULL,
-  manifest JSONB NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',
-  lease_expires_at TEXT NOT NULL,
-  heartbeat_at TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  released_at TEXT,
-  PRIMARY KEY (project_id, id)
-);
-CREATE INDEX IF NOT EXISTS idx_workpack_claims_active
-  ON workpack_claims(project_id, status, lease_expires_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_workpack_claims_one_active
-  ON workpack_claims(project_id, workpack_id) WHERE status = 'active';
-
 -- 责任认领：边界声明随认领提交（r-bc1a）；互斥按需求键（r-wp3c）
 CREATE TABLE IF NOT EXISTS claims (
   id TEXT NOT NULL,
@@ -304,7 +283,8 @@ CREATE TABLE IF NOT EXISTS claim_keys (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_keys_one_active
   ON claim_keys(project_id, requirement_key) WHERE status = 'active';
 
--- 契约变更/重规划提案（运行时状态；契约提案由基线前移确认）
+-- 契约变更提案（运行时状态；契约提案由基线前移确认）
+-- 表名 workpack_proposals 为历史遗留；workpack_id 列保留只读兼容，新行不再写入
 CREATE TABLE IF NOT EXISTS workpack_proposals (
   id TEXT NOT NULL,
   project_id TEXT NOT NULL REFERENCES projects(slug),

@@ -229,6 +229,7 @@ export async function revokeClaim(
 }
 
 // @sibom r-bc4d — 越界即失败：越界差异记为证据，该次执行不进入验收
+// @sibom r-wp5e — 完成判据：证据回传后由差距重算判定
 // @sibom r-ar6f — 完成只认证据；执行日志与自评不作为判定依据
 // @sibom r-ea4d — 证据携带产生它的认领与执行者归因
 export async function reportClaim(
@@ -336,7 +337,6 @@ export async function proposeClaimContractChange(
 
   const record: ProposalRecord = {
     id: ulid(),
-    workpack_id: null,
     claim_id: id,
     kind: 'contract',
     proposer: parsed.proposer,

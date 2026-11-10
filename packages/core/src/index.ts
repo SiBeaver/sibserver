@@ -13,7 +13,7 @@ export * from './operations/index.js';
 
 // gap & constraint types
 export * from './gap/types.js';
-export * from './workpack/types.js';
+export * from './proposals/types.js';
 export * from './claims/types.js';
 export * from './executor/types.js';
 export * from './workflow/types.js';

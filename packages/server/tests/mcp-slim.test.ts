@@ -296,19 +296,6 @@ describe('MCP 响应瘦身', () => {
         .rejects.toThrow(/认领不存在：nonexistent（认领 ID 须为 26 位完整 ULID，不接受缩写或前缀匹配）/);
     });
 
-    it('提案未命中回显 ID 与形态；已处理提案再确认回显当前状态', async () => {
-      await expect(handlers['confirm_replan_proposal']({
-        proposal_id: 'nonexistent', confirmed_by: 'me',
-      })).rejects.toThrow(/提案不存在：nonexistent（提案 ID 须为 26 位完整 ULID，不接受缩写或前缀匹配）/);
-
-      const p = await handlers['propose_replan']({ proposer: 'p', summary: 's' });
-      const proposalId = JSON.parse(p.content[0].text).id;
-      await handlers['confirm_replan_proposal']({ proposal_id: proposalId, confirmed_by: 'me' });
-      await expect(handlers['confirm_replan_proposal']({
-        proposal_id: proposalId, confirmed_by: 'me',
-      })).rejects.toThrow(/无效状态迁移：confirmed → confirmed；当前状态 confirmed，合法目标状态：\[（无）\]/);
-    });
-
     it('已完成根节点被过滤时不误报不存在', async () => {
       const id = await defineW('W');
       await handlers['update_witem_status']({ witem_id: id, new_status: 'achieved', reason: 'done' });
@@ -365,55 +352,6 @@ describe('MCP 提案工具严格拒绝正文', () => {
 
   afterEach(async () => { await close(); });
 
-  it('propose_replan 携带 detail 被拒绝', async () => {
-    const res = await client.callTool({
-      name: 'propose_replan',
-      arguments: { proposer: 'p', summary: 's', detail: { heavy: 'x' } },
-    });
-    expect(res.isError).toBe(true);
-    expect(mcpResultText(res)).toMatch(/detail/);
-  });
-
-  it('propose_replan 未知别名字段同样被拒绝', async () => {
-    const res = await client.callTool({
-      name: 'propose_replan',
-      arguments: { proposer: 'p', summary: 's', body: 'text' },
-    });
-    expect(res.isError).toBe(true);
-    expect(mcpResultText(res)).toMatch(/body/);
-  });
-
-  it('propose_contract_change 携带 detail 被拒绝', async () => {
-    const res = await client.callTool({
-      name: 'propose_contract_change',
-      arguments: {
-        workpack_id: 'wp',
-        proposer: 'p',
-        summary: 's',
-        requirement_keys: ['dom/a'],
-        refs: [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }],
-        detail: {},
-      },
-    });
-    expect(res.isError).toBe(true);
-    expect(mcpResultText(res)).toMatch(/detail/);
-  });
-
-  it('propose_contract_change refs 内嵌正文同样被拒绝', async () => {
-    const res = await client.callTool({
-      name: 'propose_contract_change',
-      arguments: {
-        workpack_id: 'wp',
-        proposer: 'p',
-        summary: 's',
-        requirement_keys: ['dom/a'],
-        refs: [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1', body: 'text' }],
-      },
-    });
-    expect(res.isError).toBe(true);
-    expect(mcpResultText(res)).toMatch(/body/);
-  });
-
   it('propose_claim_contract_change 携带 detail 被拒绝', async () => {
     const res = await client.callTool({
       name: 'propose_claim_contract_change',
@@ -428,14 +366,6 @@ describe('MCP 提案工具严格拒绝正文', () => {
     });
     expect(res.isError).toBe(true);
     expect(mcpResultText(res)).toMatch(/detail/);
-  });
-
-  it('不带正文的提案通过校验', async () => {
-    const res = await client.callTool({
-      name: 'propose_replan',
-      arguments: { proposer: 'p', summary: 's' },
-    });
-    expect(res.isError).not.toBe(true);
   });
 });
 

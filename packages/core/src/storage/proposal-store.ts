@@ -1,5 +1,5 @@
 import type { JsonbParam, Sql } from './db.js';
-import type { ProposalKind, ProposalRef, ProposalStatus, ProposalView } from '../workpack/types.js';
+import type { ProposalKind, ProposalRef, ProposalStatus, ProposalView } from '../proposals/types.js';
 
 // ============================================================
 // ProposalStore — 契约变更/重规划提案（运行时状态）
@@ -8,7 +8,6 @@ import type { ProposalKind, ProposalRef, ProposalStatus, ProposalView } from '..
 
 export interface ProposalRecord {
   id: string;
-  workpack_id: string | null;
   claim_id: string | null;
   kind: ProposalKind;
   proposer: string;
@@ -34,7 +33,6 @@ function rowToProposal(row: Record<string, unknown>): ProposalRecord {
   const refs = parseJson<unknown>(row.refs ?? []);
   return {
     id: String(row.id),
-    workpack_id: optionalString(row.workpack_id),
     claim_id: optionalString(row.claim_id),
     kind: row.kind as ProposalKind,
     proposer: String(row.proposer),
@@ -52,7 +50,6 @@ function rowToProposal(row: Record<string, unknown>): ProposalRecord {
 export function toProposalView(record: ProposalRecord): ProposalView {
   return {
     id: record.id,
-    workpack_id: record.workpack_id,
     claim_id: record.claim_id,
     kind: record.kind,
     proposer: record.proposer,
@@ -73,10 +70,10 @@ export class ProposalStore {
   async insertProposal(record: ProposalRecord): Promise<void> {
     await this.sql`
       INSERT INTO workpack_proposals
-        (id, project_id, workpack_id, claim_id, kind, proposer, requirement_keys, summary, detail, refs,
+        (id, project_id, claim_id, kind, proposer, requirement_keys, summary, detail, refs,
          status, created_at, confirmed_commit, confirmed_by, resolved_at)
       VALUES
-        (${record.id}, ${this.projectId}, ${record.workpack_id}, ${record.claim_id}, ${record.kind},
+        (${record.id}, ${this.projectId}, ${record.claim_id}, ${record.kind},
          ${record.proposer}, ${record.requirement_keys}, ${record.summary},
          ${this.sql.json({})},
          ${this.sql.json(record.refs as JsonbParam)},
@@ -121,17 +118,5 @@ export class ProposalStore {
       RETURNING id
     `;
     return rows.length;
-  }
-
-  /** 重规划提案：由人显式接受（服务端不应用提案内容） */
-  async confirmReplan(id: string, confirmedBy: string, now: string): Promise<void> {
-    await this.sql`
-      UPDATE workpack_proposals
-      SET status = 'confirmed', confirmed_by = ${confirmedBy}, resolved_at = ${now}
-      WHERE project_id = ${this.projectId}
-        AND id = ${id}
-        AND kind = 'replan'
-        AND status = 'proposed'
-    `;
   }
 }
