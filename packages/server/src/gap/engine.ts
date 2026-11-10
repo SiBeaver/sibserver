@@ -536,7 +536,7 @@ export async function setBaseline(
   return { ...r, changed_keys: [...changedKeys].sort(), superseded };
 }
 
-/** 契约变更键集合：需求新增/删除/修改（含规则判据摘要变化）；draft 进出即键变化 */
+/** 契约变更键集合：需求新增/删除/修改（含规则判据摘要变化）；draft 删除即键变化 */
 function diffBomKeys(oldBom: BomSnapshot, newBom: BomSnapshot): Set<string> {
   const changed = new Set<string>();
   const oldReqs = new Map(oldBom.requirements.map(r => [r.key, r]));

@@ -677,8 +677,7 @@ describe('Gap 引擎三方对账', () => {
 
   // ── r-vb5e：draft 身份投影不产生假差距 ────────────────────
 
-  it('r-vb5e：draft 键保留身份投影但不参与对账（无缺失、无 staleness）', async () => {
-    const bom = bomV1();
+  it('r-vb5e：draft 键保留身份投影但不参与对账（无缺失、无 staleness）', async () => {    const bom = bomV1();
     bom.draft_requirements = [{ key: 'dom/draft', title: '草案需求', rules: [{ id: 'r-dddd', title: '草案规则' }] }];
     await ctx.nodes.insert({
       id: 'req-draft', type: 'requirement', title: '草案需求', description: '', status: 'proposed',
@@ -704,6 +703,17 @@ describe('Gap 引擎三方对账', () => {
     await report([{ source_id: 'sibom-tags', payload: { rules: [{ id: 'r-dddd', file: 'src/d.ts' }] } }], LATER);
     const ledger2 = await listGaps(ctx);
     expect(ledger2.gaps.find(g => g.source_ref === '@sibom:r-dddd')).toBeUndefined();
+  });
+
+  it('r-gl9i：draft 键删除进入 changed_keys，旧行随基线迁移作废', async () => {
+    const bom = bomV1();
+    bom.draft_requirements = [{ key: 'dom/draft', title: '草案需求', rules: [{ id: 'r-dddd', title: '草案规则' }] }];
+    await baseline(bom, NOW);
+
+    const bom2 = bomV1();
+    bom2.commit = 'bbb2222';
+    const result = await baseline(bom2, LATER);
+    expect(result.changed_keys).toContain('dom/draft');
   });
 
   // ── r-vb7g：判据摘要变化进入探测 ──────────────────────────
