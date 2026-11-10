@@ -83,6 +83,8 @@ function constraintKey(c: BomConstraint): string {
 export interface ReconcileScope {
   ruleKeys: Set<string> | null;
   constraintKeys: Set<string> | null;
+  /** 基线前移已删除的需求键：只修剪需求节点 staleness，不隐藏约束/工作项信号 */
+  excludeKeys?: Set<string>;
 }
 
 const FULL_SCOPE: ReconcileScope = { ruleKeys: null, constraintKeys: null };
@@ -390,7 +392,11 @@ export async function reconcile(
     }
   }
 
-  const desired = await computeDesiredGaps(ctx, baseline.bom, constraints, effectiveScope);
+  const desired = (await computeDesiredGaps(ctx, baseline.bom, constraints, effectiveScope))
+    .filter(g => !(
+      effectiveScope.excludeKeys?.has(g.requirement_key) &&
+      g.evidence_source.startsWith('node:')
+    ));
   const scopedRows = openRows.filter(r => {
     if (r.kind === 'staleness') return true;
     if (r.evidence_source.startsWith('sibom-tags:')) {
@@ -507,18 +513,26 @@ export async function setBaseline(
     requirements: input.requirements ?? old.bom.requirements,
     draft_requirements: input.draft_requirements ?? old.bom.draft_requirements,
   };
+  const changedKeys = diffBomKeys(old.bom, bom);
+  const oldKeys = [...old.bom.requirements, ...old.bom.draft_requirements].map(requirement => requirement.key);
+  const newKeys = new Set([...bom.requirements, ...bom.draft_requirements].map(requirement => requirement.key));
+  const deletedKeys = new Set(oldKeys.filter(key => !newKeys.has(key)));
   assertPartitionsDisjoint(bom);
   await ctx.gap.setBaseline(bom, now);
-
-  const changedKeys = diffBomKeys(old.bom, bom);
   // @sibom r-ar2b — 责任范围定义变化：旧认领作废，需求键回到可领取
   await ctx.claims.expireByKeys([...changedKeys], now);
   // @sibom r-ar4d — 契约提案经人确认：基线前移且目标需求键变化即确认（commit 即确认）
+  // @sibom r-ar5e — 提案与主线确认：基线推进按变更键自动确认提案，提案不是第二写入口
   await ctx.proposals.confirmByChangedKeys(bom.commit, [...changedKeys], now);
   const openBefore = await ctx.gap.getOpenRows();
   const superseded = openBefore.filter(r => changedKeys.has(r.requirement_key)).length;
   await ctx.gap.supersedeRowsByKeys([...changedKeys], now);
-  const r = await reconcile(ctx, { ruleKeys: changedKeys, constraintKeys: changedKeys }, now, scopeSetId);
+  // @sibom r-gl9i — 基线迁移修剪已删除键差距；global 差距为卫生项
+  const r = await reconcile(ctx, {
+    ruleKeys: changedKeys,
+    constraintKeys: changedKeys,
+    excludeKeys: deletedKeys,
+  }, now, scopeSetId);
   return { ...r, changed_keys: [...changedKeys].sort(), superseded };
 }
 
@@ -533,6 +547,12 @@ function diffBomKeys(oldBom: BomSnapshot, newBom: BomSnapshot): Set<string> {
   }
   for (const key of oldReqs.keys()) {
     if (!newReqs.has(key)) changed.add(key);
+  }
+  // draft 删除同样需要作废旧行（draft 规则不参与对账，但键身份仍需留痕）
+  const oldDrafts = new Set(oldBom.draft_requirements.map(r => r.key));
+  const newDrafts = new Set(newBom.draft_requirements.map(r => r.key));
+  for (const key of oldDrafts) {
+    if (!newDrafts.has(key) && !newReqs.has(key)) changed.add(key);
   }
   return changed;
 }
@@ -623,9 +643,13 @@ export async function listGaps(ctx: OperationContext): Promise<{
   constraint_set_id: string | null;
   constraint_set_hash: string | null;
   gaps: GapView[];
-  summary: { total: number; violation: number; absence: number; staleness: number; waived: number };
+  summary: { total: number; violation: number; absence: number; staleness: number; waived: number; hygiene: number };
 }> {
   const baseline = await ctx.gap.getBaseline();
+  const knownKeys = new Set([
+    ...(baseline?.bom.requirements ?? []),
+    ...(baseline?.bom.draft_requirements ?? []),
+  ].map(requirement => requirement.key));
   const state = await ctx.gap.getGapState();
   const rows = baseline ? await ctx.gap.getOpenRows() : [];
   const waivers = await ctx.gap.getWaivers();
@@ -653,6 +677,8 @@ export async function listGaps(ctx: OperationContext): Promise<{
       evidence_reported_at: evidenceSourceId
         ? reportedAtBySource.get(evidenceSourceId) ?? null
         : null,
+      hygiene: row.requirement_key === GLOBAL_KEY ||
+        (baseline !== null && !knownKeys.has(row.requirement_key)),
     };
   });
 
@@ -667,6 +693,7 @@ export async function listGaps(ctx: OperationContext): Promise<{
       absence: gaps.filter(g => g.kind === 'absence').length,
       staleness: gaps.filter(g => g.kind === 'staleness').length,
       waived: gaps.filter(g => g.waiver !== null).length,
+      hygiene: gaps.filter(g => g.hygiene).length,
     },
   };
 }

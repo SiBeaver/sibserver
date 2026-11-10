@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { OperationContext } from '@sibeaver/core';
 import type { Sql } from '@sibeaver/core';
-import { registerTools, slimEnvelope, slimSearchResult, slimBatchResult, slimProjectStateResult } from '../src/mcp/tools.js';
+import { registerTools, slimEnvelope, slimSearchResult, slimBatchResult, slimProjectStateResult, slimCockpitResult } from '../src/mcp/tools.js';
 import { createTestDb } from '../../core/tests/helpers/test-db.js';
 
 // MCP 响应瘦身：写操作只回执确认字段，搜索截断 description
@@ -164,6 +164,22 @@ describe('MCP 响应瘦身', () => {
     expect(data).not.toHaveProperty('requirements');
     expect(data.openRequirements).toHaveLength(1);
     expect(data.statistics).toEqual({ totalRequirements: 1 });
+  });
+
+  it('slimCockpitResult 保留 blockers 摘要与计数，不再产生空对象', () => {
+    const res = slimCockpitResult({
+      content: [{ type: 'text', text: JSON.stringify({
+        witems: [{ id: 'g1', type: 'witem', title: 'G', status: 'active', description: 'x' }],
+        requirements: [],
+        blockers: [{ blocker: { id: 'r1', title: 'R', status: 'identified', severity: 'high' }, blocks: [{ id: 'g1' }] }],
+      }) }],
+    } as any);
+    const data = JSON.parse(res.content[0].text);
+    expect(data.witems.count).toBe(1);
+    expect(data.blockers).toEqual({
+      count: 1,
+      items: [{ id: 'r1', title: 'R', status: 'identified', severity: 'high', blocks: 1 }],
+    });
   });
 
   // MCP 协议服务 r-mp5e / r-mp6f：拒绝必须可自纠（回显判据），节点 ID 须完整 ULID 且不做前缀匹配。

@@ -845,10 +845,21 @@ ${existingSummary || '（暂无）'}
 
   // === Cloud 路由（原 si-beaver-cloud）===
 
+  // @sibom r-mp7g — 健康端点返回版本、API spec 版本与能力清单
   app.get('/health', (c) => c.json({
     status: 'ok',
     service: 'sibeaver',
     version: '0.2.0',
+    apiSpecVersion: '2.1.0',
+    buildCommit: process.env.GIT_COMMIT || process.env.SIB_BUILD_COMMIT || null,
+    capabilities: [
+      'knowledge_trail',
+      'claims',
+      'gaps',
+      'workflow_templates',
+      'proposals',
+      'witem',
+    ],
     uptime: process.uptime(),
   }));
 

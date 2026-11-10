@@ -224,7 +224,7 @@ describe('责任认领（claims）', () => {
 
   it('契约提案经基线前移转为 confirmed，认领同时作废', async () => {
     const claim = await createClaim(ctx, claimInput('agent-1', ['dom/a'], boundary(['src/a/'])));
-    const refs = [{ path: 'vibespec/requirements/dom/a.md', commit: 'aa1' }];
+    const refs = [{ path: 'vibespec/requirements/dom/a.md', commit: 'b3' }];
     const proposal = await proposeClaimContractChange(ctx, claim.id, {
       proposer: 'agent-1',
       summary: '补充判据',

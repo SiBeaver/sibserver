@@ -114,6 +114,11 @@ export class ProposalStore {
       WHERE project_id = ${this.projectId}
         AND kind = 'contract'
         AND status = 'proposed'
+        AND jsonb_array_length(refs) > 0
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(refs) AS ref
+          WHERE ref->>'commit' = ${commit}
+        )
         AND requirement_keys && ${keys}
       RETURNING id
     `;

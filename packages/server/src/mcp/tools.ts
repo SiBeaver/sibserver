@@ -173,7 +173,8 @@ const SLIM_WRITE_TOOLS = new Set([
 ]);
 
 const SLIM_SEARCH_TOOLS = new Set(['search_nodes', 'full_text_search']);
-const SLIM_STATE_TOOLS = new Set(['get_project_state', 'cockpit']);
+const SLIM_STATE_TOOLS = new Set(['get_project_state']);
+const SLIM_COCKPIT_TOOLS = new Set(['cockpit']);
 
 /** 状态快照节点投影：保留概览字段，description 截断，去掉 content 全文，findings 只留前 3 条 */
 function slimStateNode(node: Record<string, unknown>): Record<string, unknown> {
@@ -228,6 +229,37 @@ export function slimProjectStateResult(result: any): any {
   return result;
 }
 
+/** cockpit 投影：默认只回摘要（id/title/计数），详情走 current_blockers / get_node_context */
+// @sibom r-mp8h — cockpit 返回摘要与 blockers 计数，不返回全量节点详情/空对象
+export function slimCockpitResult(result: any): any {
+  const content = Array.isArray(result?.content) ? result.content[0] : undefined;
+  if (!content || typeof content.text !== 'string') return result;
+  try {
+    const data = JSON.parse(content.text);
+    const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
+    const witems = list(data.witems).map(item => slimStateNode(item as Record<string, unknown>));
+    const requirements = list(data.requirements).map(item => slimStateNode(item as Record<string, unknown>));
+    const blockers = list(data.blockers).map(item => {
+      const blocker = item?.blocker ?? {};
+      return {
+        id: blocker.id,
+        title: blocker.title,
+        status: blocker.status,
+        severity: blocker.severity,
+        blocks: list(item?.blocks).length,
+      };
+    });
+    content.text = JSON.stringify(snakeToCamel({
+      witems: { count: witems.length, items: witems },
+      requirements: { count: requirements.length, items: requirements },
+      blockers: { count: blockers.length, items: blockers },
+    }), null, 2);
+  } catch {
+    // 非 JSON 文本——保持原样
+  }
+  return result;
+}
+
 /** Wrap a tool handler with timing + error logging */
 function logged<A extends Record<string, unknown>>(
   label: string,
@@ -242,6 +274,8 @@ function logged<A extends Record<string, unknown>>(
         result = slimToolResult(toolName, result);
       } else if (SLIM_SEARCH_TOOLS.has(toolName)) {
         result = slimSearchToolResult(result);
+      } else if (SLIM_COCKPIT_TOOLS.has(toolName)) {
+        result = slimCockpitResult(result);
       } else if (SLIM_STATE_TOOLS.has(toolName)) {
         result = slimProjectStateResult(result);
       }

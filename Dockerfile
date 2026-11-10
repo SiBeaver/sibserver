@@ -18,9 +18,10 @@ RUN pnpm -r build
 
 # === sibs: API server runtime ===
 FROM node:22-alpine AS sibs
+ARG GIT_COMMIT=""
 WORKDIR /app
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/packages/server/dist /app/dist
-ENV NODE_ENV=production PORT=7420
+ENV NODE_ENV=production PORT=7420 GIT_COMMIT=$GIT_COMMIT
 EXPOSE 7420
 CMD ["node", "/app/dist/api/server.js"]

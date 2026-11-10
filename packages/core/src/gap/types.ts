@@ -177,6 +177,8 @@ export interface GapView extends GapRowRecord {
   waiver: { reason: string; expires_at: string | null } | null;
   /** 该行对应证据的上报时间——账单展示证据年龄；无证据行为 null */
   evidence_reported_at: string | null;
+  /** 全局卫生差距（requirement_key = '(global)'）：可展示/豁免，不进入可认领执行范围 */
+  hygiene: boolean;
 }
 
 // ── 对照视图证据结构（AI 对照降级为目检，不产差距条目）────────

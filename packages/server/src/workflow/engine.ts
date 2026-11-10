@@ -80,6 +80,7 @@ export async function checkWorkflowTemplateGates(
       missing.push({ gate_id: gate.id, evidence_source: `(引用缺失：${gate.evidence_ref})` });
       continue;
     }
+    // @sibom r-wt4d — evidence_refs.source 接受任意证据源标识，门禁只核对是否存在
     const evidence = await ctx.gap.getEvidence(ref.source);
     if (!evidence) missing.push({ gate_id: gate.id, evidence_source: ref.source });
   }

@@ -320,6 +320,64 @@ describe('Gap 引擎三方对账', () => {
     expect(reqBOpen.every(r => r.bom_commit === 'bbb2222')).toBe(true);
   });
 
+  it('基线前移删除需求键时，旧差距作废且不再按新基线开账', async () => {
+    const baseConstraint = constraintsV1()[0];
+    const reqBConstraint = {
+      ...baseConstraint,
+      id: 'c2',
+      title: 'B 约束',
+      requirement_key: 'dom/req-b',
+    };
+    await baseline(bomV1(), NOW, [baseConstraint, reqBConstraint]);
+    const before = await listGaps(ctx);
+    expect(before.gaps.some(g => g.requirement_key === 'dom/req-b')).toBe(true);
+
+    // 残留 requirement 节点：证明 excludeKeys 真正阻止 stale-node 重新开账
+    await ctx.nodes.insert({
+      id: 'req-b-node', type: 'requirement', title: '需求B', description: '',
+      status: 'accepted', priority: 'medium', tags: [],
+      created_at: NOW, updated_at: NOW, metadata: {},
+      source: 'vibespec', source_detail: 'dom/req-b', acceptance: null,
+    } as any);
+
+    const bom2 = bomV1();
+    bom2.commit = 'ccc3333';
+    bom2.requirements = bom2.requirements.filter(r => r.key !== 'dom/req-b');
+    const result = await baseline(bom2, LATER, [baseConstraint, reqBConstraint]);
+    expect(result.changed_keys).toContain('dom/req-b');
+
+    const after = await listGaps(ctx);
+    const reqBGaps = after.gaps.filter(g => g.requirement_key === 'dom/req-b');
+    // stale-node 被修剪；stale-constraint 保留并标 hygiene（r-gd3c / r-gl9i）
+    expect(reqBGaps.some(g => g.evidence_source.startsWith('node:'))).toBe(false);
+    expect(reqBGaps.find(g => g.evidence_source === 'constraint:c2')?.hygiene).toBe(true);
+    const all = await ctx.gap.getAllRows();
+    expect(all.filter(r => r.requirement_key === 'dom/req-b' && r.status === 'superseded').length).toBeGreaterThan(0);
+
+    // 节点按 sync 语义 deprecated 后，全量对账仍不重开 stale-node；约束过时保留
+    const node = await ctx.nodes.getById('req-b-node');
+    await ctx.nodes.update({ ...node!, status: 'deprecated', updated_at: '2026-07-28T04:00:00.000Z' } as any);
+    await reconcileAll('2026-07-28T04:00:00.000Z');
+    const afterReconcile = await listGaps(ctx);
+    expect(afterReconcile.gaps.some(g => g.requirement_key === 'dom/req-b' && g.evidence_source.startsWith('node:'))).toBe(false);
+    expect(afterReconcile.gaps.some(g => g.requirement_key === 'dom/req-b' && g.evidence_source === 'constraint:c2')).toBe(true);
+  });
+
+  it('global 差距标记为 hygiene，并计入摘要', async () => {
+    const globalConstraint = {
+      ...constraintsV1()[0],
+      id: 'g1',
+      title: '全局约束',
+      requirement_key: undefined,
+    };
+    await baseline(bomV1(), NOW, [globalConstraint]);
+    const ledger = await listGaps(ctx);
+    const globalGap = ledger.gaps.find(gap => gap.requirement_key === '(global)');
+    expect(globalGap).toBeDefined();
+    expect(globalGap?.hygiene).toBe(true);
+    expect(ledger.summary.hygiene).toBeGreaterThan(0);
+  });
+
   it('证据指纹不变不重算（skipped），变化才触发', async () => {
     await baseline(bomV1(), NOW);
     const r1 = await report([{ source_id: 'constraint:c1', payload: { matched: 2, total: 5 } }], LATER);

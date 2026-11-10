@@ -119,6 +119,20 @@ describe('工作流模板薄壳', () => {
     expect(after?.missing).toEqual([]);
   });
 
+  it('支持 constraint: 证据源（通用 source，不限于 gap-ledger）', async () => {
+    const input = templateInput();
+    input.contract.evidence_refs = [{ id: 'security', source: 'constraint:security-auth' }];
+    input.contract.checks[0].evidence_ref = 'security';
+    input.contract.gates = [{ id: 'security-gate', required: true, evidence_ref: 'security' }];
+
+    const registered = await registerWorkflowTemplate(ctx, input);
+    expect(registered.contract.evidence_refs[0].source).toBe('constraint:security-auth');
+
+    const gates = await checkWorkflowTemplateGates(ctx, 'wf-1');
+    expect(gates?.required_gates).toBe(1);
+    expect(gates?.evidence_present).toBe(false);
+  });
+
   it('模板不存在时返回 null', async () => {
     expect(await getWorkflowTemplate(ctx, 'nope')).toBeNull();
     expect(await checkWorkflowTemplateGates(ctx, 'nope')).toBeNull();
